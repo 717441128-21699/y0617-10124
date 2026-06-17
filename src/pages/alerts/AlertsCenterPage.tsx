@@ -25,7 +25,7 @@ const STATUS_FILTERS: Array<{ value: AlertStatus | 'all'; label: string; icon: a
 
 export function AlertsCenterPage() {
   const navigate = useNavigate();
-  const { alerts, updateAlertStatus } = useAppStore();
+  const { alerts, keywords, updateAlertStatus } = useAppStore();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<AlertStatus | 'all'>('pending');
   const [priorityFilter, setPriorityFilter] = useState<AlertPriority | 'all'>('all');
@@ -38,7 +38,10 @@ export function AlertsCenterPage() {
     if (search && !a.memberName.includes(search) && !a.keyword.includes(search) && !a.messageContent.includes(search)) return false;
     if (statusFilter !== 'all' && a.status !== statusFilter) return false;
     if (priorityFilter !== 'all' && a.priority !== priorityFilter) return false;
-    if (groupFilter !== 'all' && !a.keyword.startsWith(groupFilter === 'complaint' ? '投诉' : groupFilter === 'refund' ? '退' : '')) return true;
+    if (groupFilter !== 'all') {
+      const kw = keywords.find((k) => k.id === a.keywordId);
+      if (!kw || kw.groupType !== groupFilter) return false;
+    }
     return true;
   });
 
@@ -128,11 +131,24 @@ export function AlertsCenterPage() {
               >{p === 'all' ? '全部' : ALERT_PRIORITY_LABELS[p]}</button>
             ))}
           </div>
-          <div className="relative">
-            <button className="btn-secondary btn-sm h-9 flex items-center gap-1">
-              关键词类型
-              <ChevronDown size={13} />
-            </button>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-ink-500 flex items-center gap-1">
+              <Filter size={12} />关键词类型：
+            </span>
+            {(['all', 'complaint', 'refund', 'purchase', 'competitor', 'sensitive', 'custom'] as const).map((g) => (
+              <button
+                key={g}
+                onClick={() => setGroupFilter(g)}
+                className={cn(
+                  'px-2.5 h-7 rounded-lg text-xs font-medium transition-all',
+                  groupFilter === g
+                    ? g === 'all'
+                      ? 'bg-accent-600 text-white'
+                      : cn(KEYWORD_GROUP_COLORS[g].bg, KEYWORD_GROUP_COLORS[g].text)
+                    : 'bg-ink-50 text-ink-600 hover:bg-ink-100'
+                )}
+              >{g === 'all' ? '全部' : KEYWORD_GROUP_LABELS[g]}</button>
+            ))}
           </div>
         </div>
       </div>

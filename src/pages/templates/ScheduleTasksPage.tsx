@@ -8,6 +8,84 @@ import { TASK_STATUS_COLORS, TASK_STATUS_LABELS } from '@/utils/constants';
 import { formatDateTime, formatDate } from '@/utils/date';
 import type { ScheduleTask, TaskStatus } from '@/types';
 
+const DAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
+
+const DAY_OPTIONS = [
+  { label: '一', value: 1 },
+  { label: '二', value: 2 },
+  { label: '三', value: 3 },
+  { label: '四', value: 4 },
+  { label: '五', value: 5 },
+  { label: '六', value: 6 },
+  { label: '日', value: 0 },
+];
+
+const FREQ_OPTIONS: { label: string; value: 'daily' | 'weekly' | 'monthly' | 'custom' }[] = [
+  { label: '每天固定时间', value: 'daily' },
+  { label: '每周特定时间', value: 'weekly' },
+  { label: '每月固定日期', value: 'monthly' },
+  { label: '自定义Cron', value: 'custom' },
+];
+
+function buildCronExpression(frequency: string, scheduleTime: string, selectedDays: number[]): string {
+  const [h, m] = scheduleTime.split(':').map(Number);
+  if (frequency === 'daily') return `${m} ${h} * * *`;
+  if (frequency === 'weekly' || frequency === 'custom') return `${m} ${h} * * ${[...selectedDays].sort((a, b) => a - b).join(',')}`;
+  if (frequency === 'monthly') return `${m} ${h} 1 * *`;
+  return `${m} ${h} * * *`;
+}
+
+function buildCronDescription(frequency: string, scheduleTime: string, selectedDays: number[]): string {
+  const [h, m] = scheduleTime.split(':');
+  const timeStr = `${h}:${m}`;
+  if (frequency === 'daily') return `每天上午${timeStr}`;
+  if (frequency === 'weekly' || frequency === 'custom') {
+    const names = [...selectedDays].sort((a, b) => a - b).map((d) => DAY_LABELS[d]).join('、');
+    return `每周${names}上午${timeStr}`;
+  }
+  if (frequency === 'monthly') return `每月1日上午${timeStr}`;
+  return `每天上午${timeStr}`;
+}
+
+function computeNextRunAt(frequency: string, scheduleTime: string, selectedDays: number[]): string {
+  const [hours, minutes] = scheduleTime.split(':').map(Number);
+  const now = new Date();
+
+  if (frequency === 'daily') {
+    const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes);
+    if (candidate > now) return candidate.toISOString();
+    candidate.setDate(candidate.getDate() + 1);
+    return candidate.toISOString();
+  }
+
+  if (frequency === 'weekly' || frequency === 'custom') {
+    const currentDay = now.getDay();
+    const sortedDays = [...selectedDays].sort((a, b) => a - b);
+    if (sortedDays.includes(currentDay)) {
+      const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes);
+      if (candidate > now) return candidate.toISOString();
+    }
+    for (const day of sortedDays) {
+      if (day > currentDay) {
+        const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (day - currentDay), hours, minutes);
+        return candidate.toISOString();
+      }
+    }
+    const nextDay = sortedDays[0];
+    const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (7 - currentDay + nextDay), hours, minutes);
+    return candidate.toISOString();
+  }
+
+  if (frequency === 'monthly') {
+    const candidate = new Date(now.getFullYear(), now.getMonth(), 1, hours, minutes);
+    if (candidate > now) return candidate.toISOString();
+    return new Date(now.getFullYear(), now.getMonth() + 1, 1, hours, minutes).toISOString();
+  }
+
+  const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, hours, minutes);
+  return candidate.toISOString();
+}
+
 export function ScheduleTasksPage() {
   const navigate = useNavigate();
   const { tasks, groups } = useAppStore();
@@ -75,7 +153,7 @@ export function ScheduleTasksPage() {
         </table>
       </div>
 
-      {showModal && <CreateTaskModal onClose={() => setShowModal(false)} groups={groups} />}
+      {showModal && <CreateTaskModal onClose={() => setShowModal(false)} />}
     </div>
   );
 }
@@ -146,8 +224,63 @@ function TaskRow({ task, groupsCount }: { task: ScheduleTask; groupsCount: numbe
   );
 }
 
-function CreateTaskModal({ onClose, groups }: { onClose: () => void; groups: any[] }) {
+function CreateTaskModal({ onClose }: { onClose: () => void }) {
+  const { templates, groups, addTask } = useAppStore();
   const [step, setStep] = useState(1);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [frequency, setFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('weekly');
+  const [scheduleTime, setScheduleTime] = useState('09:00');
+  const [selectedDays, setSelectedDays] = useState<number[]>([1]);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+  const [taskName, setTaskName] = useState('');
+
+  const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
+
+  const handleSelectTemplate = (id: string) => {
+    setSelectedTemplateId(id);
+    const tpl = templates.find((t) => t.id === id);
+    if (tpl) setTaskName(tpl.title);
+  };
+
+  const toggleDay = (day: number) => {
+    setSelectedDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+    );
+  };
+
+  const toggleGroup = (id: string) => {
+    setSelectedGroupIds((prev) =>
+      prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id]
+    );
+  };
+
+  const selectAllGroups = () => {
+    setSelectedGroupIds(groups.map((g) => g.id));
+  };
+
+  const handleCreate = () => {
+    if (!selectedTemplateId || !selectedTemplate) return;
+    const cronExpression = buildCronExpression(frequency, scheduleTime, selectedDays);
+    const cronDescription = buildCronDescription(frequency, scheduleTime, selectedDays);
+    const nextRunAt = computeNextRunAt(frequency, scheduleTime, selectedDays);
+    const targetGroupNames = groups.filter((g) => selectedGroupIds.includes(g.id)).map((g) => g.name);
+
+    addTask({
+      name: taskName || selectedTemplate.title,
+      templateId: selectedTemplateId,
+      templateTitle: selectedTemplate.title,
+      cronExpression,
+      cronDescription,
+      targetGroupIds: selectedGroupIds,
+      targetGroupNames,
+      status: 'pending',
+      nextRunAt,
+    });
+    onClose();
+  };
+
+  const canNext = step === 1 ? !!selectedTemplateId : step === 3 ? selectedGroupIds.length > 0 : true;
+
   return (
     <div className="fixed inset-0 bg-ink-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-5 animate-fade-in" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-pop w-full max-w-xl overflow-hidden animate-slide-in" onClick={(e) => e.stopPropagation()}>
@@ -175,14 +308,31 @@ function CreateTaskModal({ onClose, groups }: { onClose: () => void; groups: any
             <div>
               <label className="block text-xs font-medium text-ink-700 mb-2">选择消息模板</label>
               <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
-                {['新人入群欢迎语', '周一早间问候', '每周运营数据报告', '618大促活动通知', '会员专属福利'].map((t, i) => (
-                  <label key={t} className="flex items-center gap-3 p-3 rounded-xl border border-ink-100 hover:border-accent-200 hover:bg-accent-50/30 cursor-pointer transition-all">
-                    <input type="radio" name="tpl" defaultChecked={i === 0} className="text-accent-600" />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm text-ink-900">{t}</div>
-                      <div className="text-[11px] text-ink-400 mt-0.5">包含变量 {`{{昵称}}`} {`{{群名称}}`} 等</div>
+                {templates.map((tpl) => (
+                  <div
+                    key={tpl.id}
+                    onClick={() => handleSelectTemplate(tpl.id)}
+                    className={cn(
+                      'flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all',
+                      selectedTemplateId === tpl.id
+                        ? 'border-accent-500 bg-accent-50/50'
+                        : 'border-ink-100 hover:border-accent-200 hover:bg-accent-50/30'
+                    )}
+                  >
+                    <div className={cn(
+                      'w-4 h-4 rounded-full border-2 flex items-center justify-center',
+                      selectedTemplateId === tpl.id ? 'border-accent-500' : 'border-ink-300'
+                    )}>
+                      {selectedTemplateId === tpl.id && <div className="w-2 h-2 rounded-full bg-accent-500" />}
                     </div>
-                  </label>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm text-ink-900">{tpl.title}</div>
+                      <div className="text-[11px] text-ink-400 mt-0.5">
+                        {tpl.categoryLabel}
+                        {tpl.variables.length > 0 && ` · 包含变量 ${tpl.variables.map((v) => `{{${v}}}`).join(' ')}`}
+                      </div>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -193,10 +343,26 @@ function CreateTaskModal({ onClose, groups }: { onClose: () => void; groups: any
               <div>
                 <label className="block text-xs font-medium text-ink-700 mb-2">推送频率</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {['每天固定时间', '每周特定时间', '每月固定日期', '自定义Cron'].map((x, i) => (
-                    <label key={x} className="p-3 rounded-xl border border-ink-100 hover:border-accent-200 hover:bg-accent-50/30 cursor-pointer transition-all">
-                      <input type="radio" name="freq" defaultChecked={i === 1} className="text-accent-600 mb-1" />
-                      <div className="text-xs font-medium text-ink-900">{x}</div>
+                  {FREQ_OPTIONS.map((opt) => (
+                    <label
+                      key={opt.value}
+                      onClick={() => setFrequency(opt.value)}
+                      className={cn(
+                        'p-3 rounded-xl border cursor-pointer transition-all',
+                        frequency === opt.value
+                          ? 'border-accent-500 bg-accent-50/50'
+                          : 'border-ink-100 hover:border-accent-200 hover:bg-accent-50/30'
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className={cn(
+                          'w-4 h-4 rounded-full border-2 flex items-center justify-center',
+                          frequency === opt.value ? 'border-accent-500' : 'border-ink-300'
+                        )}>
+                          {frequency === opt.value && <div className="w-2 h-2 rounded-full bg-accent-500" />}
+                        </div>
+                        <div className="text-xs font-medium text-ink-900">{opt.label}</div>
+                      </div>
                     </label>
                   ))}
                 </div>
@@ -204,19 +370,32 @@ function CreateTaskModal({ onClose, groups }: { onClose: () => void; groups: any
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-ink-700 mb-1.5">具体时间</label>
-                  <input type="time" defaultValue="09:00" className="input-base" />
+                  <input
+                    type="time"
+                    value={scheduleTime}
+                    onChange={(e) => setScheduleTime(e.target.value)}
+                    className="input-base"
+                  />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-ink-700 mb-1.5">执行星期</label>
-                  <div className="flex gap-1">
-                    {['一', '二', '三', '四', '五', '六', '日'].map((d, i) => (
-                      <span key={d} className={cn(
-                        'w-8 h-8 rounded-lg flex items-center justify-center text-xs cursor-pointer transition-colors',
-                        i === 0 ? 'bg-accent-500 text-white' : 'bg-ink-50 text-ink-500 hover:bg-ink-100'
-                      )}>{d}</span>
-                    ))}
+                {(frequency === 'weekly' || frequency === 'custom') && (
+                  <div>
+                    <label className="block text-xs font-medium text-ink-700 mb-1.5">执行星期</label>
+                    <div className="flex gap-1">
+                      {DAY_OPTIONS.map((d) => (
+                        <span
+                          key={d.value}
+                          onClick={() => toggleDay(d.value)}
+                          className={cn(
+                            'w-8 h-8 rounded-lg flex items-center justify-center text-xs cursor-pointer transition-colors',
+                            selectedDays.includes(d.value)
+                              ? 'bg-accent-500 text-white'
+                              : 'bg-ink-50 text-ink-500 hover:bg-ink-100'
+                          )}
+                        >{d.label}</span>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           )}
@@ -226,14 +405,29 @@ function CreateTaskModal({ onClose, groups }: { onClose: () => void; groups: any
               <label className="block text-xs font-medium text-ink-700 mb-2">选择目标社群 ({groups.length}个可选)</label>
               <div className="border border-ink-200 rounded-xl p-2 mb-3">
                 <div className="flex gap-2 pb-2 border-b border-ink-100 mb-2">
-                  <button className="text-xs text-accent-600 font-medium px-2 py-1 rounded-md bg-accent-50">全选</button>
-                  <button className="text-xs text-ink-500 px-2 py-1 rounded-md hover:bg-ink-50">仅付费会员群</button>
-                  <button className="text-xs text-ink-500 px-2 py-1 rounded-md hover:bg-ink-50">仅新客群</button>
+                  <button onClick={selectAllGroups} className="text-xs text-accent-600 font-medium px-2 py-1 rounded-md bg-accent-50">全选</button>
+                  <button onClick={() => setSelectedGroupIds([])} className="text-xs text-ink-500 px-2 py-1 rounded-md hover:bg-ink-50">清空</button>
                 </div>
                 <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
-                  {groups.slice(0, 8).map((g) => (
-                    <label key={g.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-ink-50 cursor-pointer">
-                      <input type="checkbox" defaultChecked className="text-accent-600 rounded" />
+                  {groups.map((g) => (
+                    <label
+                      key={g.id}
+                      onClick={() => toggleGroup(g.id)}
+                      className={cn(
+                        'flex items-center gap-2 p-2 rounded-lg cursor-pointer',
+                        selectedGroupIds.includes(g.id) ? 'bg-accent-50/60' : 'hover:bg-ink-50'
+                      )}
+                    >
+                      <div className={cn(
+                        'w-4 h-4 rounded border-2 flex items-center justify-center',
+                        selectedGroupIds.includes(g.id) ? 'border-accent-500 bg-accent-500' : 'border-ink-300'
+                      )}>
+                        {selectedGroupIds.includes(g.id) && (
+                          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
                       <span className="text-xs text-ink-700 flex-1">{g.name}</span>
                       <span className="text-[10px] text-ink-400">{g.memberCount}人</span>
                     </label>
@@ -248,9 +442,9 @@ function CreateTaskModal({ onClose, groups }: { onClose: () => void; groups: any
           <div className="flex gap-2">
             {step > 1 && <button onClick={() => setStep(step - 1)} className="btn-secondary btn-sm">上一步</button>}
             {step < 3 ? (
-              <button onClick={() => setStep(step + 1)} className="btn-primary btn-sm">下一步</button>
+              <button onClick={() => setStep(step + 1)} disabled={!canNext} className={cn('btn-primary btn-sm', !canNext && 'opacity-50 cursor-not-allowed')}>下一步</button>
             ) : (
-              <button onClick={onClose} className="btn-primary btn-sm">创建任务</button>
+              <button onClick={handleCreate} disabled={!canNext} className={cn('btn-primary btn-sm', !canNext && 'opacity-50 cursor-not-allowed')}>创建任务</button>
             )}
           </div>
         </div>

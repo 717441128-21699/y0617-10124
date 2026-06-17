@@ -9,19 +9,35 @@ import { useAppStore } from '@/store/useAppStore';
 import { Avatar } from '@/components/ui/Avatar';
 import { cn, formatNumber, formatPercent, truncateText } from '@/utils/format';
 import {
-  GROUP_TYPE_COLORS, LIFECYCLE_COLORS, MEMBER_STATUS_COLORS, MEMBER_STATUS_LABELS,
+  GROUP_TYPE_COLORS, GROUP_TYPE_LABELS, LIFECYCLE_COLORS, LIFECYCLE_LABELS, MEMBER_STATUS_COLORS, MEMBER_STATUS_LABELS,
 } from '@/utils/constants';
 import { formatDate, formatDateTime, formatRelative } from '@/utils/date';
+import type { GroupType, LifecyclePhase } from '@/types';
 import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, AreaChart, Area } from 'recharts';
 
 type TabType = 'members' | 'messages' | 'analytics' | 'settings';
 
+const OWNER_OPTIONS = [
+  { value: '运营-李娜', label: '运营-李娜' },
+  { value: '运营-王强', label: '运营-王强' },
+  { value: '运营主管-赵敏', label: '运营主管-赵敏' },
+  { value: '社群-刘洋', label: '社群-刘洋' },
+];
+
 export function GroupDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { groups, members } = useAppStore();
+  const { groups, members, updateGroup } = useAppStore();
   const [tab, setTab] = useState<TabType>('members');
+  const [toast, setToast] = useState(false);
   const group = groups.find((g) => g.id === id);
+
+  const [formName, setFormName] = useState(group?.name ?? '');
+  const [formType, setFormType] = useState<GroupType>(group?.type ?? 'new_customer');
+  const [formLifecycle, setFormLifecycle] = useState<LifecyclePhase>(group?.lifecycle ?? 'preparation');
+  const [formExpireAt, setFormExpireAt] = useState(group?.expireAt ?? '');
+  const [formOwner, setFormOwner] = useState(group?.owner ?? '');
+  const [formDescription, setFormDescription] = useState(group?.description ?? '');
 
   if (!group) {
     return (
@@ -53,6 +69,28 @@ export function GroupDetailPage() {
     { key: 'settings', label: '群设置', icon: Settings },
   ];
 
+  const resetForm = () => {
+    setFormName(group.name);
+    setFormType(group.type);
+    setFormLifecycle(group.lifecycle);
+    setFormExpireAt(group.expireAt);
+    setFormOwner(group.owner);
+    setFormDescription(group.description);
+  };
+
+  const handleSave = () => {
+    updateGroup(group.id, {
+      name: formName,
+      type: formType,
+      lifecycle: formLifecycle,
+      expireAt: formExpireAt,
+      owner: formOwner,
+      description: formDescription,
+    });
+    setToast(true);
+    setTimeout(() => setToast(false), 2000);
+  };
+
   return (
     <div className="page-container space-y-5">
       <div className="flex items-center gap-2 text-sm text-ink-500">
@@ -69,9 +107,9 @@ export function GroupDetailPage() {
               <h1 className="text-2xl font-display font-bold text-ink-900">{group.name}</h1>
               <span className={cn('badge', GROUP_TYPE_COLORS[group.type].bg, GROUP_TYPE_COLORS[group.type].text)}>
                 <span className={cn('w-1.5 h-1.5 rounded-full', GROUP_TYPE_COLORS[group.type].dot)} />
-                {group.typeLabel}
+                {GROUP_TYPE_LABELS[group.type]}
               </span>
-              <span className={cn('badge', LIFECYCLE_COLORS[group.lifecycle])}>{group.lifecycleLabel}</span>
+              <span className={cn('badge', LIFECYCLE_COLORS[group.lifecycle])}>{LIFECYCLE_LABELS[group.lifecycle]}</span>
               {group.tags.map((t) => (
                 <span key={t} className="chip bg-brand-50 text-brand-600 border border-brand-100">#{t}</span>
               ))}
@@ -296,46 +334,57 @@ export function GroupDetailPage() {
       )}
 
       {tab === 'settings' && (
-        <div className="data-card p-6 max-w-3xl">
+        <div className="data-card p-6 max-w-3xl relative">
+          {toast && (
+            <div className="absolute top-4 right-4 px-4 py-2 bg-success-50 text-success-700 text-sm font-medium rounded-lg border border-success-200 shadow-sm animate-fade-in">
+              保存成功
+            </div>
+          )}
           <h3 className="section-title mb-5">基础设置</h3>
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-ink-700 mb-1.5">社群名称</label>
-                <input className="input-base" defaultValue={group.name} />
+                <input className="input-base" value={formName} onChange={(e) => setFormName(e.target.value)} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-ink-700 mb-1.5">社群类型</label>
-                <select className="input-base">
-                  <option value={group.type}>{group.typeLabel}</option>
+                <select className="input-base" value={formType} onChange={(e) => setFormType(e.target.value as GroupType)}>
+                  {(Object.keys(GROUP_TYPE_LABELS) as GroupType[]).map((key) => (
+                    <option key={key} value={key}>{GROUP_TYPE_LABELS[key]}</option>
+                  ))}
                 </select>
               </div>
             </div>
             <div>
               <label className="block text-xs font-medium text-ink-700 mb-1.5">社群描述</label>
-              <textarea className="input-base min-h-[80px]" defaultValue={group.description} />
+              <textarea className="input-base min-h-[80px]" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-ink-700 mb-1.5">生命周期阶段</label>
-                <select className="input-base">
-                  <option>{group.lifecycleLabel}</option>
+                <select className="input-base" value={formLifecycle} onChange={(e) => setFormLifecycle(e.target.value as LifecyclePhase)}>
+                  {(Object.keys(LIFECYCLE_LABELS) as LifecyclePhase[]).map((key) => (
+                    <option key={key} value={key}>{LIFECYCLE_LABELS[key]}</option>
+                  ))}
                 </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-ink-700 mb-1.5">到期时间</label>
-                <input type="date" className="input-base" defaultValue={group.expireAt} />
+                <input type="date" className="input-base" value={formExpireAt} onChange={(e) => setFormExpireAt(e.target.value)} />
               </div>
             </div>
             <div>
               <label className="block text-xs font-medium text-ink-700 mb-1.5">负责人</label>
-              <select className="input-base">
-                <option>{group.owner}</option>
+              <select className="input-base" value={formOwner} onChange={(e) => setFormOwner(e.target.value)}>
+                {OWNER_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
               </select>
             </div>
             <div className="flex gap-2 pt-3 border-t border-ink-100">
-              <button className="btn-primary">保存设置</button>
-              <button className="btn-secondary">取消</button>
+              <button className="btn-primary" onClick={handleSave}>保存设置</button>
+              <button className="btn-secondary" onClick={resetForm}>取消</button>
               <button className="btn-danger ml-auto">删除社群</button>
             </div>
           </div>
