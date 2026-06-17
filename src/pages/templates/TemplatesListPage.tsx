@@ -1,5 +1,4 @@
-
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Plus, Clock, Edit3, Trash2, Copy, Eye, Send, Filter, ChevronRight, FileText } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
@@ -20,10 +19,44 @@ const CATEGORY_FILTERS: Array<{ value: TemplateCategory | 'all'; label: string }
 
 export function TemplatesListPage() {
   const navigate = useNavigate();
-  const { templates, deleteTemplate } = useAppStore();
+  const { templates, deleteTemplate, addTemplate, updateTemplate } = useAppStore();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<TemplateCategory | 'all'>('all');
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [showEditorModal, setShowEditorModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const [formTitle, setFormTitle] = useState('');
+  const [formCategory, setFormCategory] = useState<TemplateCategory>('welcome');
+  const [formVariables, setFormVariables] = useState('');
+  const [formContent, setFormContent] = useState('');
+
+  useEffect(() => {
+    if (showEditorModal) {
+      if (editingId) {
+        const tpl = templates.find((t) => t.id === editingId);
+        if (tpl) {
+          setFormTitle(tpl.title);
+          setFormCategory(tpl.category);
+          setFormVariables(tpl.variables.join(','));
+          setFormContent(tpl.content);
+        }
+      } else {
+        setFormTitle('');
+        setFormCategory('welcome');
+        setFormVariables('');
+        setFormContent('');
+      }
+    }
+  }, [showEditorModal, editingId, templates]);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   const filtered = templates.filter((t) => {
     if (search && !t.title.toLowerCase().includes(search.toLowerCase()) && !t.content.includes(search)) return false;
@@ -32,6 +65,45 @@ export function TemplatesListPage() {
   });
 
   const previewTemplate = templates.find((t) => t.id === previewId);
+
+  const handleCopy = (tpl: MessageTemplate) => {
+    addTemplate({
+      title: tpl.title + ' 副本',
+      category: tpl.category,
+      categoryLabel: tpl.categoryLabel,
+      content: tpl.content,
+      variables: tpl.variables,
+      createdBy: '当前用户',
+      lastUsedAt: new Date().toISOString().slice(0, 10),
+    });
+    setToast('模板已复制');
+  };
+
+  const handleSave = () => {
+    if (!formTitle.trim()) return;
+    const variables = formVariables.split(',').map((v) => v.trim()).filter(Boolean);
+    if (editingId) {
+      updateTemplate(editingId, {
+        title: formTitle,
+        category: formCategory,
+        categoryLabel: TEMPLATE_CATEGORY_LABELS[formCategory],
+        content: formContent,
+        variables,
+      });
+    } else {
+      addTemplate({
+        title: formTitle,
+        category: formCategory,
+        categoryLabel: TEMPLATE_CATEGORY_LABELS[formCategory],
+        content: formContent,
+        variables,
+        createdBy: '当前用户',
+        lastUsedAt: new Date().toISOString().slice(0, 10),
+      });
+    }
+    setShowEditorModal(false);
+    setEditingId(null);
+  };
 
   return (
     <div className="page-container space-y-5">
@@ -42,7 +114,7 @@ export function TemplatesListPage() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => navigate('/templates/schedule')} className="btn-secondary btn-sm"><Clock size={14} />定时任务</button>
-          <button className="btn-primary btn-sm"><Plus size={14} />新建模板</button>
+          <button onClick={() => { setEditingId(null); setShowEditorModal(true); }} className="btn-primary btn-sm"><Plus size={14} />新建模板</button>
         </div>
       </div>
 
@@ -75,6 +147,8 @@ export function TemplatesListPage() {
             onDelete={deleteTemplate}
             onPreview={() => setPreviewId(tpl.id)}
             onSchedule={() => navigate('/templates/schedule')}
+            onEdit={() => { setEditingId(tpl.id); setShowEditorModal(true); }}
+            onCopy={() => handleCopy(tpl)}
           />
         ))}
         {filtered.length === 0 && (
@@ -121,15 +195,60 @@ export function TemplatesListPage() {
           </div>
         </div>
       )}
+
+      {showEditorModal && (
+        <div className="fixed inset-0 bg-ink-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-5 animate-fade-in" onClick={() => { setShowEditorModal(false); setEditingId(null); }}>
+          <div className="bg-white rounded-2xl shadow-pop w-full max-w-xl overflow-hidden animate-slide-in" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-ink-100 flex items-center justify-between">
+              <h3 className="font-display font-semibold text-ink-900">{editingId ? '编辑模板' : '新建模板'}</h3>
+              <button onClick={() => { setShowEditorModal(false); setEditingId(null); }} className="btn-ghost btn-sm !p-1.5">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-ink-700 mb-1.5">标题 <span className="text-danger-500">*</span></label>
+                <input type="text" value={formTitle} onChange={(e) => setFormTitle(e.target.value)} placeholder="请输入模板标题" className="input-base w-full" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-ink-700 mb-1.5">分类</label>
+                <select value={formCategory} onChange={(e) => setFormCategory(e.target.value as TemplateCategory)} className="input-base w-full">
+                  {(Object.keys(TEMPLATE_CATEGORY_LABELS) as TemplateCategory[]).map((key) => (
+                    <option key={key} value={key}>{TEMPLATE_CATEGORY_LABELS[key]}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-ink-700 mb-1.5">变量</label>
+                <input type="text" value={formVariables} onChange={(e) => setFormVariables(e.target.value)} placeholder="多个变量用逗号分隔" className="input-base w-full" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-ink-700 mb-1.5">内容</label>
+                <textarea value={formContent} onChange={(e) => setFormContent(e.target.value)} placeholder="支持 {{变量名}} 占位符" rows={6} className="input-base w-full resize-none" />
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-ink-100 flex justify-end gap-2">
+              <button onClick={() => { setShowEditorModal(false); setEditingId(null); }} className="btn-secondary btn-sm">取消</button>
+              <button onClick={handleSave} disabled={!formTitle.trim()} className="btn-primary btn-sm">保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[60] bg-ink-900 text-white px-4 py-2 rounded-lg shadow-lg text-sm animate-fade-in">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
 
-function TemplateCard({ template, onDelete, onPreview, onSchedule }: {
+function TemplateCard({ template, onDelete, onPreview, onSchedule, onEdit, onCopy }: {
   template: MessageTemplate;
   onDelete: (id: string) => void;
   onPreview: () => void;
   onSchedule: () => void;
+  onEdit: () => void;
+  onCopy: () => void;
 }) {
   const CATEGORY_STYLES: Record<TemplateCategory, string> = {
     welcome: 'bg-accent-50 text-accent-700',
@@ -161,8 +280,8 @@ function TemplateCard({ template, onDelete, onPreview, onSchedule }: {
         </div>
         <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-2 flex-shrink-0">
           <button onClick={onPreview} className="btn-ghost btn-sm !p-1.5" title="预览"><Eye size={14} /></button>
-          <button className="btn-ghost btn-sm !p-1.5" title="编辑"><Edit3 size={14} /></button>
-          <button className="btn-ghost btn-sm !p-1.5" title="复制"><Copy size={14} /></button>
+          <button onClick={onEdit} className="btn-ghost btn-sm !p-1.5" title="编辑"><Edit3 size={14} /></button>
+          <button onClick={onCopy} className="btn-ghost btn-sm !p-1.5" title="复制"><Copy size={14} /></button>
           <button onClick={() => onDelete(template.id)} className="btn-ghost btn-sm !p-1.5 text-danger-500" title="删除"><Trash2 size={14} /></button>
         </div>
       </div>

@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useState } from 'react';
 import {
   ArrowLeft, Users, MessageSquare, BarChart2, Settings, ChevronRight,
-  Send, UserPlus, Archive, TrendingUp, Clock,
+  Send, UserPlus, Archive, TrendingUp, Clock, ClipboardList,
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { Avatar } from '@/components/ui/Avatar';
@@ -15,7 +15,7 @@ import { formatDate, formatDateTime, formatRelative } from '@/utils/date';
 import type { GroupType, LifecyclePhase } from '@/types';
 import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, AreaChart, Area } from 'recharts';
 
-type TabType = 'members' | 'messages' | 'analytics' | 'settings';
+type TabType = 'members' | 'messages' | 'analytics' | 'settings' | 'logs';
 
 const OWNER_OPTIONS = [
   { value: '运营-李娜', label: '运营-李娜' },
@@ -24,10 +24,19 @@ const OWNER_OPTIONS = [
   { value: '社群-刘洋', label: '社群-刘洋' },
 ];
 
+const LOG_COLOR_MAP: Record<string, string> = {
+  extend: 'bg-warning-500',
+  archive: 'bg-danger-500',
+  owner_change: 'bg-purple-500',
+  task_send: 'bg-accent-500',
+  member_migrate: 'bg-cyan-500',
+  edit: 'bg-brand-500',
+};
+
 export function GroupDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { groups, members, updateGroup } = useAppStore();
+  const { groups, members, updateGroup, groupLogs, archiveGroup } = useAppStore();
   const [tab, setTab] = useState<TabType>('members');
   const [toast, setToast] = useState(false);
   const group = groups.find((g) => g.id === id);
@@ -51,6 +60,7 @@ export function GroupDetailPage() {
   }
 
   const groupMembers = members.filter((m) => m.groupId === group.id);
+  const currentLogs = groupLogs.filter((l) => l.groupId === group.id);
   const messageTrend = Array.from({ length: 7 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (6 - i));
@@ -67,6 +77,7 @@ export function GroupDetailPage() {
     { key: 'messages', label: '消息记录', icon: MessageSquare },
     { key: 'analytics', label: '数据分析', icon: BarChart2 },
     { key: 'settings', label: '群设置', icon: Settings },
+    { key: 'logs', label: '运营记录', icon: ClipboardList },
   ];
 
   const resetForm = () => {
@@ -124,7 +135,7 @@ export function GroupDetailPage() {
           <div className="flex items-center gap-2">
             <button className="btn-secondary btn-sm"><UserPlus size={13} />邀请成员</button>
             <button className="btn-secondary btn-sm"><Send size={13} />发送消息</button>
-            <button className="btn-secondary btn-sm"><Archive size={13} />归档</button>
+            <button className="btn-secondary btn-sm" onClick={() => archiveGroup(group.id)}><Archive size={13} />归档</button>
           </div>
         </div>
 
@@ -388,6 +399,48 @@ export function GroupDetailPage() {
               <button className="btn-danger ml-auto">删除社群</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {tab === 'logs' && (
+        <div className="data-card overflow-hidden">
+          <div className="flex items-center justify-between p-4 border-b border-ink-100">
+            <div className="text-sm text-ink-600">
+              共 <span className="font-semibold text-ink-900">{currentLogs.length}</span> 条记录
+            </div>
+          </div>
+          {currentLogs.length === 0 ? (
+            <div className="p-16 text-center text-ink-400">暂无运营记录</div>
+          ) : (
+            <div className="p-5">
+              <div className="relative">
+                <div className="absolute left-3 top-1 bottom-1 w-0.5 bg-ink-100" />
+                <div className="space-y-5">
+                  {[...currentLogs].reverse().map((log) => (
+                    <div key={log.id} className="relative flex gap-4 pl-0">
+                      <div className="relative z-10 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <div className={cn('w-3 h-3 rounded-full ring-4 ring-white', LOG_COLOR_MAP[log.type] || 'bg-ink-400')} />
+                      </div>
+                      <div className="flex-1 min-w-0 pb-5">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-sm text-ink-900">{log.title}</div>
+                            <div className="text-xs text-ink-500 mt-1">{log.detail}</div>
+                            <div className="text-xs text-ink-400 mt-1.5">
+                              {log.operator} · {formatRelative(log.createdAt)}
+                            </div>
+                          </div>
+                          <div className="text-xs text-ink-400 flex-shrink-0 whitespace-nowrap">
+                            {formatDateTime(log.createdAt)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

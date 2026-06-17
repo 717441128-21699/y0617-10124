@@ -1,7 +1,7 @@
 
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Play, Pause, Calendar, Clock, Users2, Trash2, ChevronDown, CheckCircle2, XCircle } from 'lucide-react';
+import { ArrowLeft, Plus, Play, Pause, Calendar, Clock, Users2, Trash2, CheckCircle2, XCircle, Zap } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { cn, formatNumber } from '@/utils/format';
 import { TASK_STATUS_COLORS, TASK_STATUS_LABELS } from '@/utils/constants';
@@ -88,7 +88,7 @@ function computeNextRunAt(frequency: string, scheduleTime: string, selectedDays:
 
 export function ScheduleTasksPage() {
   const navigate = useNavigate();
-  const { tasks, groups } = useAppStore();
+  const { tasks, groups, toggleTask, deleteTask, runTaskNow } = useAppStore();
   const [showModal, setShowModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all');
 
@@ -105,11 +105,24 @@ export function ScheduleTasksPage() {
           <p className="text-sm text-ink-500 mt-1">共 <span className="font-semibold text-ink-900">{tasks.length}</span> 个任务，累计发送 {formatNumber(tasks.reduce((s, t) => s + t.totalSent, 0))} 条消息</p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="relative">
-            <button className="btn-secondary btn-sm flex items-center gap-1 h-9">
-              状态筛选
-              <ChevronDown size={13} />
-            </button>
+          <div className="flex items-center gap-1 bg-ink-50 p-1 rounded-xl">
+            <button
+              onClick={() => setStatusFilter('all')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                statusFilter === 'all' ? 'bg-white text-ink-900 shadow-sm' : 'text-ink-500 hover:text-ink-700'
+              )}
+            >全部</button>
+            {(['running', 'pending', 'paused', 'completed', 'failed'] as const).map((st) => (
+              <button
+                key={st}
+                onClick={() => setStatusFilter(st)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                  statusFilter === st ? cn('bg-white shadow-sm', TASK_STATUS_COLORS[st]) : 'text-ink-500 hover:text-ink-700'
+                )}
+              >{TASK_STATUS_LABELS[st]}</button>
+            ))}
           </div>
           <button onClick={() => setShowModal(true)} className="btn-primary btn-sm"><Plus size={14} />新建任务</button>
         </div>
@@ -147,7 +160,14 @@ export function ScheduleTasksPage() {
           </thead>
           <tbody>
             {filtered.map((task) => (
-              <TaskRow key={task.id} task={task} groupsCount={groups.length} />
+              <TaskRow
+                key={task.id}
+                task={task}
+                groupsCount={groups.length}
+                toggleTask={toggleTask}
+                runTaskNow={runTaskNow}
+                deleteTask={deleteTask}
+              />
             ))}
           </tbody>
         </table>
@@ -162,7 +182,20 @@ function formatPercentSafe(v: number): string {
   return (v * 100).toFixed(0) + '%';
 }
 
-function TaskRow({ task, groupsCount }: { task: ScheduleTask; groupsCount: number }) {
+function TaskRow({
+  task,
+  groupsCount,
+  toggleTask,
+  runTaskNow,
+  deleteTask,
+}: {
+  task: ScheduleTask;
+  groupsCount: number;
+  toggleTask: (id: string) => void;
+  runTaskNow: (id: string) => void;
+  deleteTask: (id: string) => void;
+}) {
+  const isPaused = task.status === 'paused';
   return (
     <tr className="table-row group">
       <td className="table-cell">
@@ -214,10 +247,27 @@ function TaskRow({ task, groupsCount }: { task: ScheduleTask; groupsCount: numbe
       </td>
       <td className="table-cell text-right pr-5">
         <div className="flex justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button className="btn-ghost btn-sm !p-1.5" title={task.status === 'running' ? '暂停' : '启动'}>
-            {task.status === 'running' ? <Pause size={13} /> : <Play size={13} />}
+          <button
+            onClick={() => toggleTask(task.id)}
+            className="btn-ghost btn-sm !p-1.5"
+            title={isPaused ? '启动' : '暂停'}
+          >
+            {isPaused ? <Play size={13} /> : <Pause size={13} />}
           </button>
-          <button className="btn-ghost btn-sm !p-1.5 text-danger-500" title="删除"><Trash2 size={13} /></button>
+          <button
+            onClick={() => runTaskNow(task.id)}
+            className="btn-ghost btn-sm !p-1.5 text-accent-600"
+            title="立即执行"
+          >
+            <Zap size={13} />
+          </button>
+          <button
+            onClick={() => deleteTask(task.id)}
+            className="btn-ghost btn-sm !p-1.5 text-danger-500"
+            title="删除"
+          >
+            <Trash2 size={13} />
+          </button>
         </div>
       </td>
     </tr>
@@ -260,6 +310,7 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
 
   const handleCreate = () => {
     if (!selectedTemplateId || !selectedTemplate) return;
+    if ((frequency === 'weekly' || frequency === 'custom') && selectedDays.length === 0) return;
     const cronExpression = buildCronExpression(frequency, scheduleTime, selectedDays);
     const cronDescription = buildCronDescription(frequency, scheduleTime, selectedDays);
     const nextRunAt = computeNextRunAt(frequency, scheduleTime, selectedDays);
@@ -279,7 +330,16 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
-  const canNext = step === 1 ? !!selectedTemplateId : step === 3 ? selectedGroupIds.length > 0 : true;
+  const canNext =
+    step === 1
+      ? !!selectedTemplateId
+      : step === 2
+      ? (frequency === 'weekly' || frequency === 'custom')
+        ? selectedDays.length > 0
+        : true
+      : step === 3
+      ? selectedGroupIds.length > 0
+      : true;
 
   return (
     <div className="fixed inset-0 bg-ink-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-5 animate-fade-in" onClick={onClose}>
@@ -394,6 +454,9 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
                         >{d.label}</span>
                       ))}
                     </div>
+                    {(frequency === 'weekly' || frequency === 'custom') && selectedDays.length === 0 && (
+                      <div className="text-[11px] text-danger-500 mt-1.5">请至少选择一个执行日期</div>
+                    )}
                   </div>
                 )}
               </div>

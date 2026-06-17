@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Search, Filter, Settings, ChevronDown, Send, MessageCircle, User,
-  CheckCircle, Clock, AlertCircle, XCircle, ChevronRight, Save, X, Bell,
+  CheckCircle, CheckCircle2, Clock, AlertCircle, XCircle, ChevronRight, Save, X, Bell,
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { Avatar } from '@/components/ui/Avatar';
@@ -25,12 +25,13 @@ const STATUS_FILTERS: Array<{ value: AlertStatus | 'all'; label: string; icon: a
 
 export function AlertsCenterPage() {
   const navigate = useNavigate();
-  const { alerts, keywords, updateAlertStatus } = useAppStore();
+  const { alerts, keywords, updateAlertStatus, batchUpdateAlerts } = useAppStore();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<AlertStatus | 'all'>('pending');
   const [priorityFilter, setPriorityFilter] = useState<AlertPriority | 'all'>('all');
   const [groupFilter, setGroupFilter] = useState<KeywordGroupType | 'all'>('all');
   const [selected, setSelected] = useState<string | null>(alerts.find((a) => a.status === 'pending')?.id || null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [note, setNote] = useState('');
   const [showStatusPicker, setShowStatusPicker] = useState(false);
 
@@ -150,13 +151,52 @@ export function AlertsCenterPage() {
               >{g === 'all' ? '全部' : KEYWORD_GROUP_LABELS[g]}</button>
             ))}
           </div>
+          {selectedIds.length > 0 && (
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={() => {
+                  batchUpdateAlerts(selectedIds, 'resolved');
+                  setSelectedIds([]);
+                }}
+                className="btn-primary btn-sm"
+              >
+                <CheckCircle2 size={13} />批量已解决
+              </button>
+              <button
+                onClick={() => {
+                  batchUpdateAlerts(selectedIds, 'ignored');
+                  setSelectedIds([]);
+                }}
+                className="btn-secondary btn-sm"
+              >
+                <XCircle size={13} />批量已忽略
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="grid grid-cols-5 gap-4">
         <div className="col-span-2 data-card overflow-hidden max-h-[calc(100vh-320px)] flex flex-col">
           <div className="px-4 py-3 border-b border-ink-100 flex items-center justify-between">
-            <div className="text-sm font-medium text-ink-900">告警列表 ({filtered.length})</div>
+            <div className="flex items-center gap-2.5">
+              <input
+                type="checkbox"
+                checked={filtered.length > 0 && selectedIds.length === filtered.length}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedIds(filtered.map((a) => a.id));
+                  } else {
+                    setSelectedIds([]);
+                  }
+                }}
+                className="w-3.5 h-3.5 rounded border-ink-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+              />
+              <div className="text-sm font-medium text-ink-900">告警列表 ({filtered.length})</div>
+              {selectedIds.length > 0 && (
+                <span className="text-xs text-brand-600 font-medium">已选 {selectedIds.length}/{filtered.length}</span>
+              )}
+            </div>
             <span className="text-[10px] text-ink-400">最新在前</span>
           </div>
           <div className="flex-1 overflow-y-auto scrollbar-thin">
@@ -167,13 +207,28 @@ export function AlertsCenterPage() {
                 className={cn(
                   'w-full text-left p-3.5 border-b border-ink-50 transition-all relative',
                   selected === alert.id ? 'bg-accent-50/40 border-l-4 border-l-accent-500' : 'hover:bg-ink-50',
-                  alert.status === 'pending' && selected !== alert.id && 'bg-danger-50/20'
+                  selectedIds.includes(alert.id) && 'bg-brand-50/40 border-l-4 border-l-brand-500',
+                  alert.status === 'pending' && selected !== alert.id && !selectedIds.includes(alert.id) && 'bg-danger-50/20'
                 )}
               >
-                {alert.status === 'pending' && (
+                {alert.status === 'pending' && !selectedIds.includes(alert.id) && (
                   <span className={cn('absolute top-3 right-3 w-2 h-2 rounded-full animate-pulse-dot', ALERT_PRIORITY_COLORS[alert.priority].dot)} />
                 )}
                 <div className="flex items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(alert.id)}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      if (selectedIds.includes(alert.id)) {
+                        setSelectedIds(selectedIds.filter((id) => id !== alert.id));
+                      } else {
+                        setSelectedIds([...selectedIds, alert.id]);
+                      }
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-3.5 h-3.5 mt-1 rounded border-ink-300 text-brand-600 focus:ring-brand-500 cursor-pointer flex-shrink-0"
+                  />
                   <Avatar name={alert.memberName} size="sm" />
                   <div className="flex-1 min-w-0 pr-5">
                     <div className="flex items-center gap-1.5 flex-wrap mb-1">
