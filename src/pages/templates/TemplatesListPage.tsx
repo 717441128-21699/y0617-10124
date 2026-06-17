@@ -1,11 +1,12 @@
+
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Plus, Clock, Edit3, Trash2, Copy, Eye, Send, Filter, ChevronRight, FileText } from 'lucide-react';
+import { Search, Plus, Clock, Edit3, Trash2, Copy, Eye, Send, FileText, CheckCircle2 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { cn, formatNumber, truncateText } from '@/utils/format';
 import { TEMPLATE_CATEGORY_LABELS } from '@/utils/constants';
 import { formatDate } from '@/utils/date';
-import type { MessageTemplate, TemplateCategory } from '@/types';
+import type { MessageTemplate, TemplateCategory, Group, Member } from '@/types';
 
 const CATEGORY_FILTERS: Array<{ value: TemplateCategory | 'all'; label: string }> = [
   { value: 'all', label: '全部分类' },
@@ -43,13 +44,22 @@ function renderPreview(content: string, variableExamples: Record<string, string>
 
 export function TemplatesListPage() {
   const navigate = useNavigate();
-  const { templates, deleteTemplate, addTemplate, updateTemplate } = useAppStore();
+  const { templates, deleteTemplate, addTemplate, updateTemplate, groups, members } = useAppStore();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<TemplateCategory | 'all'>('all');
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [showEditorModal, setShowEditorModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [sendTargetType, setSendTargetType] = useState<'group' | 'member'>('group');
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const [sendSuccess, setSendSuccess] = useState(false);
+
+  const groupList: Group[] = groups;
+  const memberList: Member[] = members;
 
   const [formTitle, setFormTitle] = useState('');
   const [formCategory, setFormCategory] = useState<TemplateCategory>('welcome');
@@ -139,6 +149,26 @@ export function TemplatesListPage() {
     }
     setShowEditorModal(false);
     setEditingId(null);
+  };
+
+  const getSelectedTargetName = () => {
+    if (sendTargetType === 'group' && selectedGroupId) {
+      return groupList.find((g) => g.id === selectedGroupId)?.name || '';
+    }
+    if (sendTargetType === 'member' && selectedMemberId) {
+      return memberList.find((m) => m.id === selectedMemberId)?.nickname || '';
+    }
+    return '';
+  };
+
+  const handleSendTest = () => {
+    setSendSuccess(true);
+    setTimeout(() => {
+      setShowSendModal(false);
+      setSendSuccess(false);
+      setSelectedGroupId(null);
+      setSelectedMemberId(null);
+    }, 1500);
   };
 
   const editorPreviewParts = renderPreview(formContent, variableExamples);
@@ -259,9 +289,129 @@ export function TemplatesListPage() {
                 </div>
               </div>
             </div>
-            <div className="px-5 py-3 border-t border-ink-100 flex justify-end gap-2">
+            <div className="px-5 py-3 border-t border-ink-100 flex justify-between">
               <button onClick={() => setPreviewId(null)} className="btn-secondary btn-sm">关闭</button>
-              <button onClick={() => { navigate('/templates/schedule'); setPreviewId(null); }} className="btn-primary btn-sm"><Send size={13} />使用此模板</button>
+              <div className="flex gap-2">
+                <button onClick={() => { setShowSendModal(true); setSendSuccess(false); }} className="btn-ghost btn-sm"><Send size={13} />试发</button>
+                <button onClick={() => { navigate('/templates/schedule'); setPreviewId(null); }} className="btn-primary btn-sm"><Send size={13} />使用此模板</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSendModal && previewTemplate && (
+        <div className="fixed inset-0 bg-ink-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-5 animate-fade-in" onClick={() => setShowSendModal(false)}>
+          <div className="bg-white rounded-2xl shadow-pop w-full max-w-lg overflow-hidden animate-slide-in" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-ink-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Send size={16} className="text-accent-600" />
+                <h3 className="font-display font-semibold text-ink-900">试发模拟</h3>
+              </div>
+              <button onClick={() => setShowSendModal(false)} className="btn-ghost btn-sm !p-1.5">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              {sendSuccess ? (
+                <div className="py-8 text-center">
+                  <div className="w-16 h-16 mx-auto rounded-full bg-success-50 flex items-center justify-center mb-3">
+                    <CheckCircle2 size={32} className="text-success-500" />
+                  </div>
+                  <h4 className="text-lg font-display font-semibold text-ink-900 mb-2">发送成功！</h4>
+                  <p className="text-sm text-ink-500">
+                    已模拟发送到「{getSelectedTargetName()}」<br />
+                    <span className="text-xs">{new Date().toLocaleString('zh-CN')}</span>
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-ink-700 mb-2">发送对象</label>
+                    <div className="flex gap-2 mb-3">
+                      <button
+                        onClick={() => { setSendTargetType('group'); setSelectedMemberId(null); }}
+                        className={cn(
+                          'flex-1 py-2 rounded-lg text-xs font-medium transition-all border',
+                          sendTargetType === 'group'
+                            ? 'border-accent-500 bg-accent-50 text-accent-700'
+                            : 'border-ink-200 bg-white text-ink-600 hover:border-ink-300'
+                        )}
+                      >发送到群</button>
+                      <button
+                        onClick={() => { setSendTargetType('member'); setSelectedGroupId(null); }}
+                        className={cn(
+                          'flex-1 py-2 rounded-lg text-xs font-medium transition-all border',
+                          sendTargetType === 'member'
+                            ? 'border-accent-500 bg-accent-50 text-accent-700'
+                            : 'border-ink-200 bg-white text-ink-600 hover:border-ink-300'
+                        )}
+                      >发送给成员</button>
+                    </div>
+                    <div className="border border-ink-200 rounded-xl overflow-hidden max-h-40 overflow-y-auto">
+                      {sendTargetType === 'group' ? (
+                        groupList.map((g) => (
+                          <label
+                            key={g.id}
+                            className="flex items-center gap-2 p-2 hover:bg-ink-50 cursor-pointer border-b border-ink-100 last:border-b-0"
+                            onClick={() => setSelectedGroupId(g.id)}
+                          >
+                            <div className={cn(
+                              'w-4 h-4 rounded-full border-2 flex items-center justify-center',
+                              selectedGroupId === g.id ? 'border-accent-500' : 'border-ink-300'
+                            )}>
+                              {selectedGroupId === g.id && <div className="w-2 h-2 rounded-full bg-accent-500" />}
+                            </div>
+                            <span className="text-xs text-ink-700 flex-1">{g.name}</span>
+                            <span className="text-[10px] text-ink-400">{g.memberCount}人</span>
+                          </label>
+                        ))
+                      ) : (
+                        memberList.slice(0, 20).map((m) => (
+                          <label
+                            key={m.id}
+                            className="flex items-center gap-2 p-2 hover:bg-ink-50 cursor-pointer border-b border-ink-100 last:border-b-0"
+                            onClick={() => setSelectedMemberId(m.id)}
+                          >
+                            <div className={cn(
+                              'w-4 h-4 rounded-full border-2 flex items-center justify-center',
+                              selectedMemberId === m.id ? 'border-accent-500' : 'border-ink-300'
+                            )}>
+                              {selectedMemberId === m.id && <div className="w-2 h-2 rounded-full bg-accent-500" />}
+                            </div>
+                            <span className="text-xs text-ink-700 flex-1">{m.nickname}</span>
+                            <div className="flex gap-0.5">
+                              {m.tags.slice(0, 2).map((tag) => (
+                                <span key={tag} className="chip text-[9px] !px-1.5 !py-0 bg-ink-50 text-ink-500">{tag}</span>
+                              ))}
+                            </div>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium text-ink-700 mb-2">发送内容预览</div>
+                    <div className="bg-ink-50 rounded-xl p-4 text-sm leading-relaxed whitespace-pre-line">
+                      {previewParts.map((part, i) =>
+                        part.isVar ? (
+                          <span key={i} className="text-brand-600 bg-brand-50 px-0.5 rounded">{part.text}</span>
+                        ) : (
+                          <span key={i} className="text-ink-900">{part.text}</span>
+                        )
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-ink-100 flex justify-end gap-2">
+              <button onClick={() => setShowSendModal(false)} className="btn-secondary btn-sm">取消</button>
+              {!sendSuccess && (
+                <button
+                  onClick={handleSendTest}
+                  disabled={!((sendTargetType === 'group' && selectedGroupId) || (sendTargetType === 'member' && selectedMemberId))}
+                  className={cn('btn-primary btn-sm', !((sendTargetType === 'group' && selectedGroupId) || (sendTargetType === 'member' && selectedMemberId)) && 'opacity-50 cursor-not-allowed')}
+                ><Send size={13} />发送</button>
+              )}
             </div>
           </div>
         </div>

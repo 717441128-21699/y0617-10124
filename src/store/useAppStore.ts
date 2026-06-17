@@ -80,7 +80,8 @@ interface AppState extends MockStore {
   addTask: (task: Omit<ScheduleTask, 'id' | 'totalSent' | 'createdAt'>) => void;
   toggleTask: (id: string) => void;
   deleteTask: (id: string) => void;
-  runTaskNow: (id: string) => void;
+  runTaskNow: (id: string, variableValues?: Record<string, string>) => void;
+  retryTaskExecution: (execId: string, groupId: string) => void;
   toggleKeyword: (id: string) => void;
   createGroup: (g: Omit<Group, 'id' | 'status' | 'createdAt'>) => void;
   archiveGroup: (id: string) => void;
@@ -195,12 +196,29 @@ export const useAppStore = create<AppState>()(
       deleteTask: (id) =>
         set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
 
-      runTaskNow: (id) =>
+      runTaskNow: (id, variableValues) =>
         set((s) => {
           const task = s.tasks.find((t) => t.id === id);
           if (!task) return s;
-          const sentCount = Math.floor(Math.random() * 200 + 50);
           const now = new Date().toISOString();
+          const perGroupResults = task.targetGroupIds.map((gid, i) => {
+            const g = s.groups.find((x) => x.id === gid);
+            const failed = Math.random() < 0.15;
+            const count = Math.floor(Math.random() * 100 + 30);
+            return {
+              groupId: gid,
+              groupName: g?.name || task.targetGroupNames[i] || '',
+              result: failed ? 'failed' as const : 'success' as const,
+              sentCount: failed ? 0 : count,
+              failedReason: failed ? ['接口超时', '群成员变更', '风控限制'][Math.floor(Math.random() * 3)] : undefined,
+            };
+          });
+          const totalSent = perGroupResults.reduce((sum, r) => sum + r.sentCount, 0);
+          const hasFail = perGroupResults.some((r) => r.result === 'failed');
+          const hasSuccess = perGroupResults.some((r) => r.result === 'success');
+          const overallResult: 'success' | 'failed' | 'partial' =
+            hasFail && hasSuccess ? 'partial' : hasFail ? 'failed' : 'success';
+
           const execRecord: TaskExecutionRecord = {
             id: `exec_${Date.now()}`,
             taskId: task.id,
@@ -209,33 +227,84 @@ export const useAppStore = create<AppState>()(
             templateTitle: task.templateTitle,
             targetGroupIds: task.targetGroupIds,
             targetGroupNames: task.targetGroupNames,
-            result: 'success',
-            sentCount,
+            result: overallResult,
+            sentCount: totalSent,
             executedAt: now,
             triggeredBy: 'manual',
+            variableValues: variableValues || task.variableValues,
+            perGroupResults,
           };
           const updatedTasks = s.tasks.map((t) => {
             if (t.id !== id) return t;
             return {
               ...t,
-              totalSent: t.totalSent + sentCount,
+              totalSent: t.totalSent + totalSent,
               lastRunAt: now,
-              lastRunResult: 'success' as const,
+              lastRunResult: overallResult === 'failed' ? 'failed' as const : 'success' as const,
               nextRunAt: computeNextRunByCron(t),
               status: t.status === 'completed' ? 'completed' as const : 'running' as const,
+              variableValues: variableValues || t.variableValues,
             };
           });
           let next = { ...s, tasks: updatedTasks, taskExecutions: [execRecord, ...s.taskExecutions] };
           task.targetGroupIds.forEach((gid) => {
+            const r = perGroupResults.find((x) => x.groupId === gid);
             next = { ...next, groupLogs: addLog(next, {
               groupId: gid,
               type: 'task_send',
               title: '手动执行推送任务',
-              detail: `任务「${task.name}」手动执行，发送${sentCount}条至${task.targetGroupNames.length}个群`,
+              detail: `任务「${task.name}」手动执行，发送${r?.sentCount || 0}条，${r?.result === 'success' ? '成功' : `失败：${r?.failedReason || '未知'}`}`,
               operator: OPERATOR,
             }).groupLogs };
           });
           return next;
+        }),
+
+      retryTaskExecution: (execId, groupId) =>
+        set((s) => {
+          const sourceExec = s.taskExecutions.find((e) => e.id === execId);
+          if (!sourceExec) return s;
+          const task = s.tasks.find((t) => t.id === sourceExec.taskId);
+          if (!task) return s;
+          const now = new Date().toISOString();
+          const count = Math.floor(Math.random() * 100 + 30);
+          const perGroupResults = [{
+            groupId,
+            groupName: sourceExec.targetGroupNames[sourceExec.targetGroupIds.indexOf(groupId)] || '',
+            result: 'success' as const,
+            sentCount: count,
+            retryAt: now,
+          }];
+          const execRecord: TaskExecutionRecord = {
+            id: `exec_${Date.now()}`,
+            taskId: sourceExec.taskId,
+            taskName: `${sourceExec.taskName}（补发）`,
+            templateId: sourceExec.templateId,
+            templateTitle: sourceExec.templateTitle,
+            targetGroupIds: [groupId],
+            targetGroupNames: perGroupResults.map((r) => r.groupName),
+            result: 'success',
+            sentCount: count,
+            executedAt: now,
+            triggeredBy: 'retry',
+            retrySourceId: execId,
+            variableValues: sourceExec.variableValues,
+            perGroupResults,
+          };
+          const updatedExecs = s.taskExecutions.map((e) => {
+            if (e.id !== execId) return e;
+            return {
+              ...e,
+              perGroupResults: e.perGroupResults.map((r) =>
+                r.groupId === groupId ? { ...r, result: 'success' as const, sentCount: count, retryAt: now, failedReason: undefined } : r
+              ),
+            };
+          });
+          const updatedTasks = s.tasks.map((t) => {
+            if (t.id !== task.id) return t;
+            return { ...t, totalSent: t.totalSent + count };
+          });
+          return { ...s, taskExecutions: [execRecord, ...updatedExecs], tasks: updatedTasks };
         }),
 
       createGroup: (g) =>

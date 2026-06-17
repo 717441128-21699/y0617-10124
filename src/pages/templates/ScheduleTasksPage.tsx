@@ -1,7 +1,7 @@
 
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Play, Pause, Calendar, Clock, Users2, Trash2, CheckCircle2, XCircle, Zap } from 'lucide-react';
+import { ArrowLeft, Plus, Play, Pause, Calendar, Clock, Users2, Trash2, CheckCircle2, XCircle, Zap, RotateCcw, FileText } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { cn, formatNumber } from '@/utils/format';
 import { TASK_STATUS_COLORS, TASK_STATUS_LABELS } from '@/utils/constants';
@@ -26,6 +26,30 @@ const FREQ_OPTIONS: { label: string; value: 'daily' | 'weekly' | 'monthly' | 'cu
   { label: '每月固定日期', value: 'monthly' },
   { label: '自定义Cron', value: 'custom' },
 ];
+
+function renderPreview(content: string, variableExamples: Record<string, string>) {
+  const parts: Array<{ text: string; isVar: boolean; varName?: string }> = [];
+  let lastIndex = 0;
+  const regex = /\{\{([^}]+)\}\}/g;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ text: content.slice(lastIndex, match.index), isVar: false });
+    }
+    const varName = match[1];
+    const example = variableExamples[varName];
+    if (example && example.trim()) {
+      parts.push({ text: example, isVar: false });
+    } else {
+      parts.push({ text: match[0], isVar: true, varName });
+    }
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < content.length) {
+    parts.push({ text: content.slice(lastIndex), isVar: false });
+  }
+  return parts;
+}
 
 function buildCronExpression(frequency: string, scheduleTime: string, selectedDays: number[]): string {
   const [h, m] = scheduleTime.split(':').map(Number);
@@ -95,6 +119,8 @@ function TaskExecPanel({
   executions: TaskExecutionRecord[];
   onBack: () => void;
 }) {
+  const { retryTaskExecution } = useAppStore();
+  const [selectedExecId, setSelectedExecId] = useState<string | null>(null);
   const totalCount = executions.length;
   const successCount = executions.filter((e) => e.result === 'success').length;
   const failedCount = executions.filter((e) => e.result === 'failed').length;
@@ -153,44 +179,111 @@ function TaskExecPanel({
               </tr>
             ) : (
               executions.map((exec) => (
-                <tr key={exec.id} className="table-row">
-                  <td className="table-cell">
-                    <div className="flex items-center gap-1 text-xs">
-                      <Clock size={11} className="text-ink-400" />
-                      <span className="text-ink-700">{formatDateTime(exec.executedAt)}</span>
-                    </div>
-                  </td>
-                  <td className="table-cell">
-                    <span className={cn(
-                      'badge text-[10px]',
-                      exec.triggeredBy === 'schedule' ? 'bg-ink-100 text-ink-600' : 'bg-accent-50 text-accent-600'
-                    )}>
-                      {exec.triggeredBy === 'schedule' ? '定时' : '手动'}
-                    </span>
-                  </td>
-                  <td className="table-cell">
-                    <div className="flex items-center gap-1 text-xs text-ink-600">
-                      <Users2 size={12} className="text-ink-400" />
-                      <span>
-                        {exec.targetGroupNames.slice(0, 3).join('、')}
-                        {exec.targetGroupNames.length > 3 ? ` +${exec.targetGroupNames.length - 3}` : ''}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="table-cell">
-                    <span className="font-display font-semibold text-sm text-ink-900">{formatNumber(exec.sentCount)}</span>
-                  </td>
-                  <td className="table-cell">
-                    {exec.result === 'success' ? (
-                      <span className="badge bg-success-50 text-success-700">成功</span>
-                    ) : (
-                      <span className="badge bg-danger-50 text-danger-700">失败</span>
-                    )}
-                  </td>
-                  <td className="table-cell">
-                    <span className="text-sm text-brand-600 font-medium">{exec.templateTitle}</span>
-                  </td>
-                </tr>
+                <>
+                  <tr
+                    key={exec.id}
+                    className="table-row cursor-pointer hover:bg-ink-50"
+                    onClick={() => setSelectedExecId(selectedExecId === exec.id ? null : exec.id)}
+                  >
+                    <td className="table-cell">
+                      <div className="flex items-center gap-1 text-xs">
+                        <Clock size={11} className="text-ink-400" />
+                        <span className="text-ink-700">{formatDateTime(exec.executedAt)}</span>
+                      </div>
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-1">
+                        <span className={cn(
+                          'badge text-[10px]',
+                          exec.triggeredBy === 'schedule' ? 'bg-ink-100 text-ink-600' :
+                          exec.triggeredBy === 'retry' ? 'bg-ink-100 text-ink-500' : 'bg-accent-50 text-accent-600'
+                        )}>
+                          {exec.triggeredBy === 'schedule' ? '定时' :
+                           exec.triggeredBy === 'retry' ? '重试' : '手动'}
+                        </span>
+                        {exec.triggeredBy === 'retry' && exec.retrySourceId && (
+                          <span className="badge bg-ink-50 text-ink-400 text-[9px]">
+                            补发自执行记录 {exec.retrySourceId.slice(-8)}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-1 text-xs text-ink-600">
+                        <Users2 size={12} className="text-ink-400" />
+                        <span>
+                          {exec.targetGroupNames.slice(0, 3).join('、')}
+                          {exec.targetGroupNames.length > 3 ? ` +${exec.targetGroupNames.length - 3}` : ''}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="table-cell">
+                      <span className="font-display font-semibold text-sm text-ink-900">{formatNumber(exec.sentCount)}</span>
+                    </td>
+                    <td className="table-cell">
+                      {exec.result === 'success' ? (
+                        <span className="badge bg-success-50 text-success-700">成功</span>
+                      ) : exec.result === 'partial' ? (
+                        <span className="badge bg-warning-50 text-warning-700">部分成功</span>
+                      ) : (
+                        <span className="badge bg-danger-50 text-danger-700">失败</span>
+                      )}
+                    </td>
+                    <td className="table-cell">
+                      <span className="text-sm text-brand-600 font-medium">{exec.templateTitle}</span>
+                    </td>
+                  </tr>
+                  {selectedExecId === exec.id && (
+                    <tr>
+                      <td colSpan={6} className="bg-ink-50/50 border-t border-ink-100 p-4">
+                        <div className="p-4">
+                          <div className="flex items-center gap-2 mb-3">
+                            <h4 className="text-sm font-semibold text-ink-900">各群发送详情</h4>
+                            {exec.triggeredBy === 'retry' && exec.retrySourceId && (
+                              <span className="badge bg-ink-100 text-ink-500 text-[10px]">
+                                补发自执行记录 {exec.retrySourceId.slice(-8)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="space-y-2">
+                            {exec.perGroupResults.map((r) => (
+                              <div key={r.groupId} className="flex items-center justify-between bg-white rounded-lg p-3 border border-ink-100">
+                                <div className="flex items-center gap-3 flex-1">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-sm font-medium text-ink-900">{r.groupName}</div>
+                                    <div className="text-xs text-ink-400 mt-0.5">发送人数：{formatNumber(r.sentCount)}</div>
+                                    {r.result === 'failed' && r.failedReason && (
+                                      <div className="text-xs text-danger-500 mt-0.5">{r.failedReason}</div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {r.result === 'success' ? (
+                                    <span className="badge bg-success-50 text-success-700">成功</span>
+                                  ) : (
+                                    <span className="badge bg-danger-50 text-danger-700">失败</span>
+                                  )}
+                                  {r.result === 'failed' && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        retryTaskExecution(exec.id, r.groupId);
+                                      }}
+                                      className="btn-ghost btn-sm !p-1.5 text-ink-500 hover:text-danger-600"
+                                      title="重试"
+                                    >
+                                      <RotateCcw size={13} />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))
             )}
           </tbody>
@@ -255,7 +348,7 @@ export function ScheduleTasksPage() {
                 <span className={cn('badge', TASK_STATUS_COLORS[st])}>{TASK_STATUS_LABELS[st]}</span>
                 <span className="font-display font-bold text-2xl text-ink-900">{list.length}</span>
               </div>
-              <div className="text-[11px] text-ink-400">占比 {formatPercentSafe(list.length / tasks.length)}</div>
+              <div className="text-[11px] text-ink-400">占比 {tasks.length === 0 ? '0%' : formatPercentSafe(list.length / tasks.length)}</div>
             </div>
           );
         })}
@@ -267,6 +360,12 @@ export function ScheduleTasksPage() {
           executions={selectedExecutions}
           onBack={() => setSelectedTaskId(null)}
         />
+      ) : filtered.length === 0 ? (
+        <div className="data-card p-12 text-center">
+          <div className="text-ink-400 text-4xl mb-3">📭</div>
+          <h3 className="text-lg font-display font-semibold text-ink-700 mb-2">暂无任务</h3>
+          <p className="text-sm text-ink-400">点击右上角创建第一个定时推送任务</p>
+        </div>
       ) : (
         <div className="data-card overflow-hidden">
           <table className="w-full">
@@ -306,6 +405,7 @@ export function ScheduleTasksPage() {
 }
 
 function formatPercentSafe(v: number): string {
+  if (!isFinite(v) || isNaN(v)) return '0%';
   return (v * 100).toFixed(0) + '%';
 }
 
@@ -412,13 +512,19 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
   const [selectedDays, setSelectedDays] = useState<number[]>([1]);
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [taskName, setTaskName] = useState('');
+  const [variableValues, setVariableValues] = useState<Record<string, string>>({});
 
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
+  const totalSteps = selectedTemplate?.variables.length ? 4 : 3;
+  const stepTitles = ['选择模板', '设置时间', '选择目标群', '填写变量'];
 
   const handleSelectTemplate = (id: string) => {
     setSelectedTemplateId(id);
     const tpl = templates.find((t) => t.id === id);
-    if (tpl) setTaskName(tpl.title);
+    if (tpl) {
+      setTaskName(tpl.title);
+      setVariableValues({});
+    }
   };
 
   const toggleDay = (day: number) => {
@@ -440,6 +546,10 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
   const handleCreate = () => {
     if (!selectedTemplateId || !selectedTemplate) return;
     if ((frequency === 'weekly' || frequency === 'custom') && selectedDays.length === 0) return;
+    if (selectedTemplate.variables.length > 0) {
+      const allFilled = selectedTemplate.variables.every((v) => variableValues[v] && variableValues[v].trim());
+      if (!allFilled) return;
+    }
     const cronExpression = buildCronExpression(frequency, scheduleTime, selectedDays);
     const cronDescription = buildCronDescription(frequency, scheduleTime, selectedDays);
     const nextRunAt = computeNextRunAt(frequency, scheduleTime, selectedDays);
@@ -455,6 +565,7 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
       targetGroupNames,
       status: 'pending',
       nextRunAt,
+      variableValues,
     });
     onClose();
   };
@@ -468,6 +579,8 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
         : true
       : step === 3
       ? selectedGroupIds.length > 0
+      : step === 4
+      ? selectedTemplate?.variables.every((v) => variableValues[v] && variableValues[v].trim())
       : true;
 
   return (
@@ -476,19 +589,19 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
         <div className="px-5 py-4 border-b border-ink-100 flex items-center justify-between">
           <div>
             <h3 className="font-display font-semibold text-ink-900">新建定时任务</h3>
-            <p className="text-[11px] text-ink-400 mt-0.5">步骤 {step}/3 · {['选择模板', '设置时间', '选择目标群'][step - 1]}</p>
+            <p className="text-[11px] text-ink-400 mt-0.5">步骤 {step}/{totalSteps} · {stepTitles[step - 1]}</p>
           </div>
           <button onClick={onClose} className="btn-ghost btn-sm !p-1.5">✕</button>
         </div>
         <div className="p-5">
           <div className="flex items-center gap-2 mb-5">
-            {[1, 2, 3].map((i) => (
+            {[1, 2, 3, 4].slice(0, totalSteps).map((i) => (
               <div key={i} className="flex-1 flex items-center">
                 <div className={cn(
                   'w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold',
                   i <= step ? 'bg-accent-500 text-white' : 'bg-ink-100 text-ink-400'
                 )}>{i}</div>
-                {i < 3 && <div className={cn('flex-1 h-0.5 mx-1.5 rounded', i < step ? 'bg-accent-500' : 'bg-ink-100')} />}
+                {i < totalSteps && <div className={cn('flex-1 h-0.5 mx-1.5 rounded', i < step ? 'bg-accent-500' : 'bg-ink-100')} />}
               </div>
             ))}
           </div>
@@ -628,12 +741,53 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
           )}
+
+          {step === 4 && selectedTemplate && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-ink-700 mb-2">填写变量值</label>
+                <div className="bg-ink-50/50 rounded-xl p-4 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    {selectedTemplate.variables.map((v) => (
+                      <div key={v}>
+                        <label className="block text-xs text-ink-600 mb-1">{v}</label>
+                        <input
+                          type="text"
+                          value={variableValues[v] || ''}
+                          onChange={(e) => setVariableValues((prev) => ({ ...prev, [v]: e.target.value }))}
+                          placeholder={`输入{{${v}}}的值`}
+                          className="input-base w-full h-8 text-sm"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-ink-700 mb-2">预览效果</div>
+                <div className="bg-ink-50 rounded-xl p-4 text-sm leading-relaxed whitespace-pre-line">
+                  {renderPreview(selectedTemplate.content, variableValues).map((part, i) =>
+                    part.isVar ? (
+                      <span key={i} className="text-brand-600 bg-brand-50 px-0.5 rounded">{part.text}</span>
+                    ) : (
+                      <span key={i} className="text-ink-900">{part.text}</span>
+                    )
+                  )}
+                </div>
+                {!canNext && (
+                  <div className="text-[11px] text-danger-500 mt-1.5">请填写所有变量</div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
         <div className="px-5 py-3 border-t border-ink-100 flex justify-between">
           <button onClick={onClose} className="btn-secondary btn-sm">取消</button>
           <div className="flex gap-2">
             {step > 1 && <button onClick={() => setStep(step - 1)} className="btn-secondary btn-sm">上一步</button>}
-            {step < 3 ? (
+            {step === 3 && selectedTemplate?.variables.length ? (
+              <button onClick={() => setStep(step + 1)} disabled={!canNext} className={cn('btn-primary btn-sm', !canNext && 'opacity-50 cursor-not-allowed')}>下一步</button>
+            ) : step < totalSteps ? (
               <button onClick={() => setStep(step + 1)} disabled={!canNext} className={cn('btn-primary btn-sm', !canNext && 'opacity-50 cursor-not-allowed')}>下一步</button>
             ) : (
               <button onClick={handleCreate} disabled={!canNext} className={cn('btn-primary btn-sm', !canNext && 'opacity-50 cursor-not-allowed')}>创建任务</button>

@@ -81,6 +81,7 @@ export interface ScheduleTask {
   cronDescription: string;
   targetGroupIds: string[];
   targetGroupNames: string[];
+  variableValues?: Record<string, string>;
   status: TaskStatus;
   nextRunAt: string;
   lastRunAt?: string;
@@ -206,10 +207,20 @@ export interface TaskExecutionRecord {
   templateTitle: string;
   targetGroupIds: string[];
   targetGroupNames: string[];
-  result: 'success' | 'failed';
+  result: 'success' | 'failed' | 'partial';
   sentCount: number;
   executedAt: string;
-  triggeredBy: 'schedule' | 'manual';
+  triggeredBy: 'schedule' | 'manual' | 'retry';
+  retrySourceId?: string;
+  variableValues?: Record<string, string>;
+  perGroupResults: Array<{
+    groupId: string;
+    groupName: string;
+    result: 'success' | 'failed';
+    sentCount: number;
+    failedReason?: string;
+    retryAt?: string;
+  }>;
 }
 
 export type GroupLogType = 'extend' | 'archive' | 'owner_change' | 'task_send' | 'member_migrate' | 'edit' | 'communication' | 'activity' | 'complaint';
