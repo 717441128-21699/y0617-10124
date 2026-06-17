@@ -17,6 +17,30 @@ const CATEGORY_FILTERS: Array<{ value: TemplateCategory | 'all'; label: string }
   { value: 'custom', label: '自定义' },
 ];
 
+function renderPreview(content: string, variableExamples: Record<string, string>) {
+  const parts: Array<{ text: string; isVar: boolean; varName?: string }> = [];
+  let lastIndex = 0;
+  const regex = /\{\{([^}]+)\}\}/g;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ text: content.slice(lastIndex, match.index), isVar: false });
+    }
+    const varName = match[1];
+    const example = variableExamples[varName];
+    if (example && example.trim()) {
+      parts.push({ text: example, isVar: false });
+    } else {
+      parts.push({ text: match[0], isVar: true, varName });
+    }
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < content.length) {
+    parts.push({ text: content.slice(lastIndex), isVar: false });
+  }
+  return parts;
+}
+
 export function TemplatesListPage() {
   const navigate = useNavigate();
   const { templates, deleteTemplate, addTemplate, updateTemplate } = useAppStore();
@@ -31,6 +55,9 @@ export function TemplatesListPage() {
   const [formCategory, setFormCategory] = useState<TemplateCategory>('welcome');
   const [formVariables, setFormVariables] = useState('');
   const [formContent, setFormContent] = useState('');
+  const [variableExamples, setVariableExamples] = useState<Record<string, string>>({});
+
+  const [previewVariableExamples, setPreviewVariableExamples] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (showEditorModal) {
@@ -48,8 +75,15 @@ export function TemplatesListPage() {
         setFormVariables('');
         setFormContent('');
       }
+      setVariableExamples({});
     }
   }, [showEditorModal, editingId, templates]);
+
+  useEffect(() => {
+    if (previewId) {
+      setPreviewVariableExamples({});
+    }
+  }, [previewId]);
 
   useEffect(() => {
     if (toast) {
@@ -65,6 +99,8 @@ export function TemplatesListPage() {
   });
 
   const previewTemplate = templates.find((t) => t.id === previewId);
+
+  const parsedFormVariables = formVariables.split(',').map((v) => v.trim()).filter(Boolean);
 
   const handleCopy = (tpl: MessageTemplate) => {
     addTemplate({
@@ -104,6 +140,10 @@ export function TemplatesListPage() {
     setShowEditorModal(false);
     setEditingId(null);
   };
+
+  const editorPreviewParts = renderPreview(formContent, variableExamples);
+
+  const previewParts = previewTemplate ? renderPreview(previewTemplate.content, previewVariableExamples) : [];
 
   return (
     <div className="page-container space-y-5">
@@ -166,7 +206,7 @@ export function TemplatesListPage() {
               </div>
               <button onClick={() => setPreviewId(null)} className="btn-ghost btn-sm !p-1.5">✕</button>
             </div>
-            <div className="p-5 bg-ink-50/50">
+            <div className="p-5 bg-ink-50/50 space-y-4">
               <div className="mb-3 flex items-center justify-between">
                 <div>
                   <div className="font-semibold text-ink-900">{previewTemplate.title}</div>
@@ -184,8 +224,39 @@ export function TemplatesListPage() {
                   </div>
                 )}
               </div>
+              {previewTemplate.variables.length > 0 && (
+                <div className="bg-white rounded-xl border border-ink-100 p-4 space-y-3">
+                  <div className="text-xs font-medium text-ink-700">试填变量</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {previewTemplate.variables.map((v) => (
+                      <div key={v}>
+                        <label className="block text-xs text-ink-600 mb-1">{v}</label>
+                        <input
+                          type="text"
+                          value={previewVariableExamples[v] || ''}
+                          onChange={(e) => setPreviewVariableExamples((prev) => ({ ...prev, [v]: e.target.value }))}
+                          placeholder={`输入{{${v}}}的示例值`}
+                          className="input-base w-full h-8 text-sm"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="bg-white rounded-xl border border-ink-100 p-4 text-sm text-ink-700 leading-relaxed whitespace-pre-line">
                 {previewTemplate.content}
+              </div>
+              <div>
+                <div className="text-xs font-medium text-ink-700 mb-2">预览效果</div>
+                <div className="bg-ink-50 rounded-xl p-4 text-sm leading-relaxed whitespace-pre-line">
+                  {previewParts.map((part, i) =>
+                    part.isVar ? (
+                      <span key={i} className="text-brand-600 bg-brand-50 px-0.5 rounded">{part.text}</span>
+                    ) : (
+                      <span key={i} className="text-ink-900">{part.text}</span>
+                    )
+                  )}
+                </div>
               </div>
             </div>
             <div className="px-5 py-3 border-t border-ink-100 flex justify-end gap-2">
@@ -220,9 +291,40 @@ export function TemplatesListPage() {
                 <label className="block text-sm font-medium text-ink-700 mb-1.5">变量</label>
                 <input type="text" value={formVariables} onChange={(e) => setFormVariables(e.target.value)} placeholder="多个变量用逗号分隔" className="input-base w-full" />
               </div>
+              {parsedFormVariables.length > 0 && (
+                <div className="bg-ink-50/50 rounded-xl p-4 space-y-3">
+                  <div className="text-xs font-medium text-ink-700">变量示例</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {parsedFormVariables.map((v) => (
+                      <div key={v}>
+                        <label className="block text-xs text-ink-600 mb-1">{v}</label>
+                        <input
+                          type="text"
+                          value={variableExamples[v] || ''}
+                          onChange={(e) => setVariableExamples((prev) => ({ ...prev, [v]: e.target.value }))}
+                          placeholder={`输入{{${v}}}的示例值`}
+                          className="input-base w-full h-8 text-sm"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-ink-700 mb-1.5">内容</label>
                 <textarea value={formContent} onChange={(e) => setFormContent(e.target.value)} placeholder="支持 {{变量名}} 占位符" rows={6} className="input-base w-full resize-none" />
+              </div>
+              <div>
+                <div className="text-xs font-medium text-ink-700 mb-2">预览效果</div>
+                <div className="bg-ink-50 rounded-xl p-4 text-sm leading-relaxed whitespace-pre-line">
+                  {editorPreviewParts.map((part, i) =>
+                    part.isVar ? (
+                      <span key={i} className="text-brand-600 bg-brand-50 px-0.5 rounded">{part.text}</span>
+                    ) : (
+                      <span key={i} className="text-ink-900">{part.text}</span>
+                    )
+                  )}
+                </div>
               </div>
             </div>
             <div className="px-5 py-3 border-t border-ink-100 flex justify-end gap-2">

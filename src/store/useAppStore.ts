@@ -2,13 +2,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { buildMockStore, type MockStore } from '@/mocks/data';
-import type { Group, Member, MemberTag, MessageTemplate, Keyword, Alert, ScheduleTask, AlertStatus, ExpiringGroup } from '@/types';
+import type { Group, Member, MemberTag, MessageTemplate, Keyword, Alert, ScheduleTask, AlertStatus, ExpiringGroup, TaskExecutionRecord, GroupLogType } from '@/types';
 import { GROUP_TYPE_LABELS, LIFECYCLE_LABELS } from '@/utils/constants';
 
 export interface GroupOperationLog {
   id: string;
   groupId: string;
-  type: 'extend' | 'archive' | 'owner_change' | 'task_send' | 'member_migrate' | 'edit';
+  type: GroupLogType;
   title: string;
   detail: string;
   operator: string;
@@ -66,6 +66,7 @@ function computeNextRunByCron(task: ScheduleTask): string {
 interface AppState extends MockStore {
   selectedGroupId?: string;
   groupLogs: GroupOperationLog[];
+  taskExecutions: TaskExecutionRecord[];
   setSelectedGroup: (id?: string) => void;
   updateAlertStatus: (id: string, status: AlertStatus, note?: string) => void;
   batchUpdateAlerts: (ids: string[], status: AlertStatus) => void;
@@ -87,7 +88,6 @@ interface AppState extends MockStore {
   addGroupLog: (log: Omit<GroupOperationLog, 'id' | 'createdAt'>) => void;
 }
 
-const LOGGERS: { [key: string]: '运营系统' } = {};
 const OPERATOR = '运营管理员';
 
 function addLog(s: AppState, log: Omit<GroupOperationLog, 'id' | 'createdAt'>): AppState {
@@ -106,6 +106,7 @@ export const useAppStore = create<AppState>()(
       ...initial,
       expiringGroups: recomputeExpiring(initial.groups),
       groupLogs: [],
+      taskExecutions: [],
 
       setSelectedGroup: (id) => set({ selectedGroupId: id }),
 
@@ -195,21 +196,47 @@ export const useAppStore = create<AppState>()(
         set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
 
       runTaskNow: (id) =>
-        set((s) => ({
-          tasks: s.tasks.map((t) => {
+        set((s) => {
+          const task = s.tasks.find((t) => t.id === id);
+          if (!task) return s;
+          const sentCount = Math.floor(Math.random() * 200 + 50);
+          const now = new Date().toISOString();
+          const execRecord: TaskExecutionRecord = {
+            id: `exec_${Date.now()}`,
+            taskId: task.id,
+            taskName: task.name,
+            templateId: task.templateId,
+            templateTitle: task.templateTitle,
+            targetGroupIds: task.targetGroupIds,
+            targetGroupNames: task.targetGroupNames,
+            result: 'success',
+            sentCount,
+            executedAt: now,
+            triggeredBy: 'manual',
+          };
+          const updatedTasks = s.tasks.map((t) => {
             if (t.id !== id) return t;
-            const sent = t.totalSent + Math.floor(Math.random() * 200 + 50);
-            const now = new Date().toISOString();
             return {
               ...t,
-              totalSent: sent,
+              totalSent: t.totalSent + sentCount,
               lastRunAt: now,
-              lastRunResult: 'success',
+              lastRunResult: 'success' as const,
               nextRunAt: computeNextRunByCron(t),
-              status: t.status === 'completed' ? 'completed' : t.status,
+              status: t.status === 'completed' ? 'completed' as const : 'running' as const,
             };
-          }),
-        })),
+          });
+          let next = { ...s, tasks: updatedTasks, taskExecutions: [execRecord, ...s.taskExecutions] };
+          task.targetGroupIds.forEach((gid) => {
+            next = { ...next, groupLogs: addLog(next, {
+              groupId: gid,
+              type: 'task_send',
+              title: '手动执行推送任务',
+              detail: `任务「${task.name}」手动执行，发送${sentCount}条至${task.targetGroupNames.length}个群`,
+              operator: OPERATOR,
+            }).groupLogs };
+          });
+          return next;
+        }),
 
       createGroup: (g) =>
         set((s) => {
@@ -323,6 +350,7 @@ export const useAppStore = create<AppState>()(
         compareResult: state.compareResult,
         expiringGroups: state.expiringGroups,
         groupLogs: state.groupLogs,
+        taskExecutions: state.taskExecutions,
       }),
     }
   )

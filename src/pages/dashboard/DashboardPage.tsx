@@ -88,7 +88,7 @@ export function DashboardPage() {
         />
         <KpiCard
           label="待处理告警"
-          value={pendingAlerts.length}
+          value={kpi.pendingAlerts}
           deltaSuffix="件"
           accentColor="warning"
           icon={<AlertTriangle size={20} strokeWidth={1.8} />}

@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useState } from 'react';
 import {
   ArrowLeft, Users, MessageSquare, BarChart2, Settings, ChevronRight,
-  Send, UserPlus, Archive, TrendingUp, Clock, ClipboardList,
+  Send, UserPlus, Archive, TrendingUp, Clock, ClipboardList, Plus,
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { Avatar } from '@/components/ui/Avatar';
@@ -12,7 +12,7 @@ import {
   GROUP_TYPE_COLORS, GROUP_TYPE_LABELS, LIFECYCLE_COLORS, LIFECYCLE_LABELS, MEMBER_STATUS_COLORS, MEMBER_STATUS_LABELS,
 } from '@/utils/constants';
 import { formatDate, formatDateTime, formatRelative } from '@/utils/date';
-import type { GroupType, LifecyclePhase } from '@/types';
+import type { GroupType, LifecyclePhase, GroupLogType } from '@/types';
 import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, AreaChart, Area } from 'recharts';
 
 type TabType = 'members' | 'messages' | 'analytics' | 'settings' | 'logs';
@@ -31,12 +31,27 @@ const LOG_COLOR_MAP: Record<string, string> = {
   task_send: 'bg-accent-500',
   member_migrate: 'bg-cyan-500',
   edit: 'bg-brand-500',
+  communication: 'bg-blue-500',
+  activity: 'bg-emerald-500',
+  complaint: 'bg-red-500',
+};
+
+const LOG_TYPE_LABELS: Record<GroupLogType, string> = {
+  extend: '续期',
+  archive: '归档',
+  owner_change: '负责人变更',
+  task_send: '推送任务',
+  member_migrate: '成员迁移',
+  edit: '编辑',
+  communication: '沟通',
+  activity: '活动',
+  complaint: '投诉',
 };
 
 export function GroupDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { groups, members, updateGroup, groupLogs, archiveGroup } = useAppStore();
+  const { groups, members, updateGroup, groupLogs, archiveGroup, addGroupLog } = useAppStore();
   const [tab, setTab] = useState<TabType>('members');
   const [toast, setToast] = useState(false);
   const group = groups.find((g) => g.id === id);
@@ -47,6 +62,13 @@ export function GroupDetailPage() {
   const [formExpireAt, setFormExpireAt] = useState(group?.expireAt ?? '');
   const [formOwner, setFormOwner] = useState(group?.owner ?? '');
   const [formDescription, setFormDescription] = useState(group?.description ?? '');
+
+  const [logTypeFilter, setLogTypeFilter] = useState<GroupLogType | 'all'>('all');
+  const [logTimeFilter, setLogTimeFilter] = useState<'7d' | '30d' | '90d' | 'all'>('all');
+  const [showAddLogModal, setShowAddLogModal] = useState(false);
+  const [newLogType, setNewLogType] = useState<GroupLogType>('communication');
+  const [newLogTitle, setNewLogTitle] = useState('');
+  const [newLogDetail, setNewLogDetail] = useState('');
 
   if (!group) {
     return (
@@ -404,39 +426,124 @@ export function GroupDetailPage() {
 
       {tab === 'logs' && (
         <div className="data-card overflow-hidden">
-          <div className="flex items-center justify-between p-4 border-b border-ink-100">
-            <div className="text-sm text-ink-600">
-              共 <span className="font-semibold text-ink-900">{currentLogs.length}</span> 条记录
+          <div className="p-4 border-b border-ink-100 space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-ink-500 mr-1">类型</span>
+              <button
+                onClick={() => setLogTypeFilter('all')}
+                className={cn('badge cursor-pointer transition-all', logTypeFilter === 'all' ? 'bg-accent-500 text-white' : 'bg-ink-100 text-ink-600 hover:bg-ink-200')}
+              >全部</button>
+              {(Object.keys(LOG_TYPE_LABELS) as GroupLogType[]).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setLogTypeFilter(t)}
+                  className={cn('badge cursor-pointer transition-all', logTypeFilter === t ? 'bg-accent-500 text-white' : 'bg-ink-100 text-ink-600 hover:bg-ink-200')}
+                >{LOG_TYPE_LABELS[t]}</button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-ink-500 mr-1">时间</span>
+              {([
+                { key: '7d' as const, label: '近7天' },
+                { key: '30d' as const, label: '近30天' },
+                { key: '90d' as const, label: '近90天' },
+                { key: 'all' as const, label: '全部' },
+              ]).map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => setLogTimeFilter(opt.key)}
+                  className={cn('badge cursor-pointer transition-all', logTimeFilter === opt.key ? 'bg-accent-500 text-white' : 'bg-ink-100 text-ink-600 hover:bg-ink-200')}
+                >{opt.label}</button>
+              ))}
+              <button
+                onClick={() => setShowAddLogModal(true)}
+                className="btn-primary btn-sm ml-auto"
+              ><Plus size={13} />补录记录</button>
             </div>
           </div>
-          {currentLogs.length === 0 ? (
-            <div className="p-16 text-center text-ink-400">暂无运营记录</div>
-          ) : (
-            <div className="p-5">
-              <div className="relative">
-                <div className="absolute left-3 top-1 bottom-1 w-0.5 bg-ink-100" />
-                <div className="space-y-5">
-                  {[...currentLogs].reverse().map((log) => (
-                    <div key={log.id} className="relative flex gap-4 pl-0">
-                      <div className="relative z-10 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <div className={cn('w-3 h-3 rounded-full ring-4 ring-white', LOG_COLOR_MAP[log.type] || 'bg-ink-400')} />
-                      </div>
-                      <div className="flex-1 min-w-0 pb-5">
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="min-w-0">
-                            <div className="font-semibold text-sm text-ink-900">{log.title}</div>
-                            <div className="text-xs text-ink-500 mt-1">{log.detail}</div>
-                            <div className="text-xs text-ink-400 mt-1.5">
-                              {log.operator} · {formatRelative(log.createdAt)}
+          {(() => {
+            const now = Date.now();
+            const filtered = currentLogs.filter((log) => {
+              if (logTypeFilter !== 'all' && log.type !== logTypeFilter) return false;
+              if (logTimeFilter !== 'all') {
+                const days = logTimeFilter === '7d' ? 7 : logTimeFilter === '30d' ? 30 : 90;
+                const diff = (now - new Date(log.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+                if (diff > days) return false;
+              }
+              return true;
+            });
+            return filtered.length === 0 ? (
+              <div className="p-16 text-center text-ink-400">暂无匹配的运营记录</div>
+            ) : (
+              <div className="p-5">
+                <div className="relative">
+                  <div className="absolute left-3 top-1 bottom-1 w-0.5 bg-ink-100" />
+                  <div className="space-y-5">
+                    {[...filtered].reverse().map((log) => (
+                      <div key={log.id} className="relative flex gap-4 pl-0">
+                        <div className="relative z-10 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <div className={cn('w-3 h-3 rounded-full ring-4 ring-white', LOG_COLOR_MAP[log.type] || 'bg-ink-400')} />
+                        </div>
+                        <div className="flex-1 min-w-0 pb-5">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <div className="font-semibold text-sm text-ink-900">{log.title}</div>
+                              <div className="text-xs text-ink-500 mt-1">{log.detail}</div>
+                              <div className="text-xs text-ink-400 mt-1.5">
+                                {log.operator} · {formatRelative(log.createdAt)}
+                              </div>
                             </div>
-                          </div>
-                          <div className="text-xs text-ink-400 flex-shrink-0 whitespace-nowrap">
-                            {formatDateTime(log.createdAt)}
+                            <div className="text-xs text-ink-400 flex-shrink-0 whitespace-nowrap">
+                              {formatDateTime(log.createdAt)}
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+          {showAddLogModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+              <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
+                <h3 className="font-display font-bold text-lg text-ink-900">补录运营记录</h3>
+                <div>
+                  <label className="block text-xs font-medium text-ink-700 mb-1.5">类型</label>
+                  <select className="input-base" value={newLogType} onChange={(e) => setNewLogType(e.target.value as GroupLogType)}>
+                    {(Object.keys(LOG_TYPE_LABELS) as GroupLogType[]).map((t) => (
+                      <option key={t} value={t}>{LOG_TYPE_LABELS[t]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-ink-700 mb-1.5">标题 <span className="text-danger-500">*</span></label>
+                  <input className="input-base" value={newLogTitle} onChange={(e) => setNewLogTitle(e.target.value)} placeholder="请输入标题" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-ink-700 mb-1.5">详情 <span className="text-danger-500">*</span></label>
+                  <textarea className="input-base min-h-[80px]" value={newLogDetail} onChange={(e) => setNewLogDetail(e.target.value)} placeholder="请输入详情" />
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button
+                    className="btn-primary"
+                    disabled={!newLogTitle.trim() || !newLogDetail.trim()}
+                    onClick={() => {
+                      addGroupLog({
+                        groupId: group.id,
+                        type: newLogType,
+                        title: newLogTitle.trim() || LOG_TYPE_LABELS[newLogType],
+                        detail: newLogDetail.trim(),
+                        operator: '运营管理员',
+                      });
+                      setShowAddLogModal(false);
+                      setNewLogType('communication');
+                      setNewLogTitle('');
+                      setNewLogDetail('');
+                    }}
+                  >保存</button>
+                  <button className="btn-secondary" onClick={() => setShowAddLogModal(false)}>取消</button>
                 </div>
               </div>
             </div>

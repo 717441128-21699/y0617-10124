@@ -197,3 +197,19 @@ export interface StrategyCompareResult {
   trends: { date: string; values: Record<string, number> }[];
   insights: string[];
 }
+
+export interface TaskExecutionRecord {
+  id: string;
+  taskId: string;
+  taskName: string;
+  templateId: string;
+  templateTitle: string;
+  targetGroupIds: string[];
+  targetGroupNames: string[];
+  result: 'success' | 'failed';
+  sentCount: number;
+  executedAt: string;
+  triggeredBy: 'schedule' | 'manual';
+}
+
+export type GroupLogType = 'extend' | 'archive' | 'owner_change' | 'task_send' | 'member_migrate' | 'edit' | 'communication' | 'activity' | 'complaint';

@@ -6,7 +6,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { cn, formatNumber } from '@/utils/format';
 import { TASK_STATUS_COLORS, TASK_STATUS_LABELS } from '@/utils/constants';
 import { formatDateTime, formatDate } from '@/utils/date';
-import type { ScheduleTask, TaskStatus } from '@/types';
+import type { ScheduleTask, TaskStatus, TaskExecutionRecord } from '@/types';
 
 const DAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -86,13 +86,131 @@ function computeNextRunAt(frequency: string, scheduleTime: string, selectedDays:
   return candidate.toISOString();
 }
 
+function TaskExecPanel({
+  task,
+  executions,
+  onBack,
+}: {
+  task: ScheduleTask;
+  executions: TaskExecutionRecord[];
+  onBack: () => void;
+}) {
+  const totalCount = executions.length;
+  const successCount = executions.filter((e) => e.result === 'success').length;
+  const failedCount = executions.filter((e) => e.result === 'failed').length;
+  const totalSentCount = executions.reduce((s, e) => s + e.sentCount, 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <button onClick={onBack} className="btn-ghost btn-sm !p-1.5 text-ink-500 hover:text-ink-900">
+          <ArrowLeft size={16} />
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h2 className="font-display font-bold text-lg text-ink-900 truncate">{task.name}</h2>
+            <span className={cn('badge', TASK_STATUS_COLORS[task.status])}>{TASK_STATUS_LABELS[task.status]}</span>
+          </div>
+          <p className="text-xs text-ink-400 mt-0.5">{task.cronDescription}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-4 gap-3">
+        <div className="data-card p-3 text-center">
+          <div className="text-[11px] text-ink-400">总执行次数</div>
+          <div className="font-display font-bold text-xl text-ink-900 mt-1">{totalCount}</div>
+        </div>
+        <div className="data-card p-3 text-center">
+          <div className="text-[11px] text-ink-400">成功次数</div>
+          <div className="font-display font-bold text-xl text-success-600 mt-1">{successCount}</div>
+        </div>
+        <div className="data-card p-3 text-center">
+          <div className="text-[11px] text-ink-400">失败次数</div>
+          <div className="font-display font-bold text-xl text-danger-600 mt-1">{failedCount}</div>
+        </div>
+        <div className="data-card p-3 text-center">
+          <div className="text-[11px] text-ink-400">总发送人数</div>
+          <div className="font-display font-bold text-xl text-accent-600 mt-1">{formatNumber(totalSentCount)}</div>
+        </div>
+      </div>
+
+      <div className="data-card overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-ink-50/70 border-b border-ink-100">
+            <tr>
+              <th className="table-header">执行时间</th>
+              <th className="table-header">触发方式</th>
+              <th className="table-header">目标群</th>
+              <th className="table-header">发送人数</th>
+              <th className="table-header">结果</th>
+              <th className="table-header">使用模板</th>
+            </tr>
+          </thead>
+          <tbody>
+            {executions.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="py-12 text-center text-sm text-ink-400">暂无执行记录</td>
+              </tr>
+            ) : (
+              executions.map((exec) => (
+                <tr key={exec.id} className="table-row">
+                  <td className="table-cell">
+                    <div className="flex items-center gap-1 text-xs">
+                      <Clock size={11} className="text-ink-400" />
+                      <span className="text-ink-700">{formatDateTime(exec.executedAt)}</span>
+                    </div>
+                  </td>
+                  <td className="table-cell">
+                    <span className={cn(
+                      'badge text-[10px]',
+                      exec.triggeredBy === 'schedule' ? 'bg-ink-100 text-ink-600' : 'bg-accent-50 text-accent-600'
+                    )}>
+                      {exec.triggeredBy === 'schedule' ? '定时' : '手动'}
+                    </span>
+                  </td>
+                  <td className="table-cell">
+                    <div className="flex items-center gap-1 text-xs text-ink-600">
+                      <Users2 size={12} className="text-ink-400" />
+                      <span>
+                        {exec.targetGroupNames.slice(0, 3).join('、')}
+                        {exec.targetGroupNames.length > 3 ? ` +${exec.targetGroupNames.length - 3}` : ''}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="table-cell">
+                    <span className="font-display font-semibold text-sm text-ink-900">{formatNumber(exec.sentCount)}</span>
+                  </td>
+                  <td className="table-cell">
+                    {exec.result === 'success' ? (
+                      <span className="badge bg-success-50 text-success-700">成功</span>
+                    ) : (
+                      <span className="badge bg-danger-50 text-danger-700">失败</span>
+                    )}
+                  </td>
+                  <td className="table-cell">
+                    <span className="text-sm text-brand-600 font-medium">{exec.templateTitle}</span>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function ScheduleTasksPage() {
   const navigate = useNavigate();
-  const { tasks, groups, toggleTask, deleteTask, runTaskNow } = useAppStore();
+  const { tasks, groups, taskExecutions, toggleTask, deleteTask, runTaskNow } = useAppStore();
   const [showModal, setShowModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all');
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const filtered = tasks.filter((t) => statusFilter === 'all' || t.status === statusFilter);
+
+  const selectedTask = selectedTaskId ? tasks.find((t) => t.id === selectedTaskId) : null;
+  const selectedExecutions = selectedTaskId ? taskExecutions.filter((e) => e.taskId === selectedTaskId) : [];
 
   return (
     <div className="page-container space-y-5">
@@ -143,35 +261,44 @@ export function ScheduleTasksPage() {
         })}
       </div>
 
-      <div className="data-card overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-ink-50/70 border-b border-ink-100">
-            <tr>
-              <th className="table-header">任务名称</th>
-              <th className="table-header">使用模板</th>
-              <th className="table-header">推送规则</th>
-              <th className="table-header">目标社群</th>
-              <th className="table-header">状态</th>
-              <th className="table-header">下次执行</th>
-              <th className="table-header text-right">累计发送</th>
-              <th className="table-header">上次结果</th>
-              <th className="table-header text-right pr-5">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                groupsCount={groups.length}
-                toggleTask={toggleTask}
-                runTaskNow={runTaskNow}
-                deleteTask={deleteTask}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {selectedTask ? (
+        <TaskExecPanel
+          task={selectedTask}
+          executions={selectedExecutions}
+          onBack={() => setSelectedTaskId(null)}
+        />
+      ) : (
+        <div className="data-card overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-ink-50/70 border-b border-ink-100">
+              <tr>
+                <th className="table-header">任务名称</th>
+                <th className="table-header">使用模板</th>
+                <th className="table-header">推送规则</th>
+                <th className="table-header">目标社群</th>
+                <th className="table-header">状态</th>
+                <th className="table-header">下次执行</th>
+                <th className="table-header text-right">累计发送</th>
+                <th className="table-header">上次结果</th>
+                <th className="table-header text-right pr-5">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  groupsCount={groups.length}
+                  toggleTask={toggleTask}
+                  runTaskNow={runTaskNow}
+                  deleteTask={deleteTask}
+                  onRowClick={() => setSelectedTaskId(task.id)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {showModal && <CreateTaskModal onClose={() => setShowModal(false)} />}
     </div>
@@ -188,16 +315,18 @@ function TaskRow({
   toggleTask,
   runTaskNow,
   deleteTask,
+  onRowClick,
 }: {
   task: ScheduleTask;
   groupsCount: number;
   toggleTask: (id: string) => void;
   runTaskNow: (id: string) => void;
   deleteTask: (id: string) => void;
+  onRowClick: () => void;
 }) {
   const isPaused = task.status === 'paused';
   return (
-    <tr className="table-row group">
+    <tr className="table-row group cursor-pointer" onClick={onRowClick}>
       <td className="table-cell">
         <div className="font-medium text-ink-900">{task.name}</div>
         <div className="text-[11px] text-ink-400">创建于 {formatDate(task.createdAt)}</div>
@@ -246,7 +375,7 @@ function TaskRow({
         )}
       </td>
       <td className="table-cell text-right pr-5">
-        <div className="flex justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
           <button
             onClick={() => toggleTask(task.id)}
             className="btn-ghost btn-sm !p-1.5"
